@@ -42,6 +42,7 @@ def doProcessInputArgs():
     global g_args
     global g_testnames
     global g_verbose
+    global g_path
 
     theHelpDescription = """
 Automated black box testing for CLI programs. The current implementation
@@ -53,6 +54,7 @@ and subdirectories.
 
     parser = argparse.ArgumentParser(description=theHelpDescription)
     parser.add_argument('testname',  type=str, nargs='+', help='path to test; can be a glob pattern')
+    parser.add_argument('-p',  '--path', type=str, help='path to search for executables first')
     parser.add_argument('-v', '--verbose', action='store_true', help='show more status messages while executing')
     g_args = parser.parse_args()
 
@@ -60,12 +62,16 @@ and subdirectories.
     # but we really should validate
     g_testnames = g_args.testname
     g_verbose = g_args.verbose
+    if g_args.path is not None and len(g_args.path) > 0 :
+        g_path = g_args.path
 
     # Print out the configuration - its useful 
     printPhase("Starting bootstrapper...")
     printStatus("Configuration")
     printStatus(f"    workroot: {g_workRoot}")
     printStatus(f"    testnames: {g_testnames}")
+    if g_path is not None :
+        printStatus(f"    path: {g_path}")
  
 def funcDeleteRw(action, name, exc) :
     os.chmod(name, stat.S_IWRITE)
@@ -83,6 +89,7 @@ g_runTestRoot = g_workRoot.joinpath("runroot")
 g_args = None
 g_testname = None
 g_verbose = False
+g_path = None
 
 # Has to be done first because the verbose flag controls what is printed
 # in subsequent steps.
@@ -149,8 +156,13 @@ for pat in g_testnames :
         else:
             vstring = ""
 
+        envToUse = os.environ.copy()
+        if g_path is not None :
+            envToUse["PATH"] = g_path + os.pathsep + envToUse["PATH"]
+
+        print("")
         cmd = f"{pPath} {os.path.abspath('pysrc/runTest.py')} {g_runTestRoot} {os.path.abspath(v)}  {vstring}"
-        subprocess.run(cmd.split(), cwd=g_runTestRoot)
+        subprocess.run(cmd.split(), cwd=g_runTestRoot, env=envToUse)
 
         # The tests change working directories, so before we can clean anything for
         # the next test, we have to get out of the directory we will clean

@@ -73,6 +73,9 @@ def doProcessInputArgs():
     g_providedUser = g_args.user
     g_providedPassword = g_args.password
 
+    print(shutil.which("wvs"))
+
+
 """     # Print out the configuration - its useful 
     printPhase("Starting test runner...")
     printStatus("Configuration")

@@ -1,7 +1,7 @@
+import os
 import re
 import subprocess
 
-lastStatus = False
 
 ##############################################################################
 # Useful utilities used internall in this module but also available to the 
@@ -57,6 +57,9 @@ def matchOne(patternList, theString) :
         return matchBasic(patternList, theString)
 
 
+def xAnywhere(v) :
+    return re.escape(v)
+
 def xFullLine(v) :
     return r"^" + re.escape(v) + r"\r?\n"
 
@@ -74,7 +77,10 @@ def xBeginningOfLine(v) :
 ##############################################################################
 
 def endTest(status : bool):
-    lastStatus = True
+    quit()
+
+def failTest(message : str):
+    print("    FAIL: ({message})")
     quit()
 
 
@@ -127,7 +133,7 @@ def validateCommandStruct(v) :
     return True
 
 
-def runCommand(testvals) :
+def checkRunCommand(testvals) :
     firstfail = True
     def firstFailFunc() :
         nonlocal firstfail
@@ -201,3 +207,23 @@ def runCommand(testvals) :
 
     print(f"    PASS: {testvals['cmd']}")
 
+def checkFileExists(fn : str) :
+    if os.path.exists(fn) :
+        print(f"    PASS: (File exists - '{fn}')")
+    else:
+        print(f"    FAIL: (File missing - '{fn}')")
+        endTest(False)
+
+def checkFileWriteable(fn : str) :
+    if os.access(fn, os.W_OK) :
+        print(f"    PASS: (File writeable - '{fn}')")
+    else:
+        print(f"    FAIL: (File not writeable - '{fn}')")
+        endTest(False)
+
+def checkFileReadOnly(fn : str) :
+    if not os.access(fn, os.W_OK) :
+        print(f"    PASS: (File read only - '{fn}')")
+    else:
+        print(f"    FAIL: (File writeable - '{fn}')")
+        endTest(False)
