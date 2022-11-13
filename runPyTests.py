@@ -160,8 +160,7 @@ for pat in g_testnames :
         if g_path is not None :
             envToUse["PATH"] = g_path + os.pathsep + envToUse["PATH"]
 
-        print("")
-        cmd = f"{pPath} {os.path.abspath('pysrc/runTest.py')} {g_runTestRoot} {os.path.abspath(v)}  {vstring}"
+        cmd = f"{pPath} {os.path.abspath('pysrc/runTest.py')} {v} {g_runTestRoot} {os.path.abspath(v)}  {vstring}"
         subprocess.run(cmd.split(), cwd=g_runTestRoot, env=envToUse)
 
         # The tests change working directories, so before we can clean anything for

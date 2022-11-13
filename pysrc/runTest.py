@@ -4,6 +4,7 @@
 # alphabetized (logically, not pedantically)
 
 import argparse
+import colorama
 import getpass
 import os
 import pathlib
@@ -16,6 +17,7 @@ import time
 import traceback
 import venv
 
+from colorama import Fore, Back, Style
 from pathlib import Path
 
 
@@ -49,6 +51,7 @@ def doProcessInputArgs():
     global g_verbose
 
     parser = argparse.ArgumentParser(description='Automated tests for WVS CLI')
+    parser.add_argument('displayName',  type=str, nargs=1, help='Test name to display')
     parser.add_argument('workroot',  type=str, nargs=1, help='Workspace folder')
     parser.add_argument('testname',  type=str, nargs=1, help='Test(s) to run')
     parser.add_argument('--password', type=str, help='Password')
@@ -73,9 +76,6 @@ def doProcessInputArgs():
     g_providedUser = g_args.user
     g_providedPassword = g_args.password
 
-    print(shutil.which("wvs"))
-
-
 """     # Print out the configuration - its useful 
     printPhase("Starting test runner...")
     printStatus("Configuration")
@@ -97,13 +97,15 @@ g_testname = None
 g_workRoot = None
 g_verbose = False
 
+# We print in color
+colorama.init()
 
 # Process input arguments - output is g_args
 doProcessInputArgs()
 
 # run the appropirate test
 
-printPhase(f"Running test '{g_args.testname[0]}'.")
+printPhase(f"    {Fore.YELLOW}Running test '{Path(g_args.displayName[0]).as_posix()}'{Style.RESET_ALL}")
 
 incfile = g_args.testname[0]
 returnLocals = {}

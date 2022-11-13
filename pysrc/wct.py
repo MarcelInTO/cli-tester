@@ -2,6 +2,21 @@ import os
 import re
 import subprocess
 
+from colorama import Fore, Back, Style
+
+##############################################################################
+# Internal utilities for formatted output
+##############################################################################
+
+g_indentLevel = 1
+
+def indentString() -> str :
+    global g_indentLevel
+    ret = ""
+    for x in range(g_indentLevel) :
+        ret += "    "
+    return ret
+
 
 ##############################################################################
 # Useful utilities used internall in this module but also available to the 
@@ -80,7 +95,7 @@ def endTest(status : bool):
     quit()
 
 def failTest(message : str):
-    print("    FAIL: ({message})")
+    print(f"{indentString()}    {Fore.RED}FAIL: ({message}){Style.RESET_ALL}")
     quit()
 
 
@@ -139,7 +154,7 @@ def checkRunCommand(testvals) :
         nonlocal firstfail
         if firstfail:
             firstfail = False
-            print(f"    FAIL: {testvals['cmd']}")
+            print(f"{indentString()}    {Fore.RED}FAIL: {testvals['cmd']}{Style.RESET_ALL}")
 
     def entryExists(k) :
         nonlocal testvals
@@ -160,70 +175,79 @@ def checkRunCommand(testvals) :
     if entryExists("expect_returncode") :
         if result.returncode != testvals["expect_returncode"] :
             firstFailFunc()
-            print(f"        BAD:  expect_returncode [got {result.returncode}, expected {testvals['expect_returncode']}]")
+            print(f"{indentString()}        {Fore.RED}BAD:  expect_returncode [got {result.returncode}, expected {testvals['expect_returncode']}]{Style.RESET_ALL}")
         else:
             oklist.append("expect_returncode")
 
     if entryExists("dontexpect_returncode") :
         if result.returncode == testvals["dontexpect_returncode"] :
             firstFailFunc()
-            print(f"        BAD:  dontexpect_returncode")
+            print(f"{indentString()}        {Fore.RED}BAD:  dontexpect_returncode{Style.RESET_ALL}")
         else:
             oklist.append("dontexpect_returncode")
 
     if entryExists("expect_stdout") :
         if not matchAll(testvals["expect_stdout"], result.stdout.decode('utf-8')):
             firstFailFunc()
-            print(f"        BAD:  expect_stdout")
+            print(f"{indentString()}        {Fore.RED}BAD:  expect_stdout{Style.RESET_ALL}")
         else:
             oklist.append("expect_stdout")
 
     if entryExists("dontexpect_stdout") :
         if matchOne(testvals["dontexpect_stdout"], result.stdout.decode('utf-8')) :
             firstFailFunc()
-            print(f"        BAD:  dontexpect_stdout")
+            print(f"{indentString()}        {Fore.RED}BAD:  dontexpect_stdout{Style.RESET_ALL}")
         else:
             oklist.append("dontexpect_stdout")
 
     if entryExists("expect_stderr") :
         if not matchAll(testvals["expect_stderr"], result.stderr.decode('utf-8')):
             firstFailFunc()
-            print(f"        BAD:  expect_stderr")
+            print(f"{indentString()}        {Fore.RED}BAD:  expect_stderr{Style.RESET_ALL}")
         else:
             oklist.append("expect_stderr")
 
     if entryExists("dontexpect_stderr") :
         if matchOne(testvals["dontexpect_stderr"], result.stderr.decode('utf-8')):
             firstFailFunc()
-            print(f"        BAD:  dontexpect_stderr")
+            print(f"{indentString()}        {Fore.RED}BAD:  dontexpect_stderr{Style.RESET_ALL}")
         else:
             oklist.append("dontexpect_stderr")
 
     if not firstfail :
         for x in oklist :
-            print(f"        OK:   {x}")
+            print(f"{indentString()}        {Fore.GREEN}OK:   {x}{Style.RESET_ALL}")
 
         endTest(False)
 
-    print(f"    PASS: {testvals['cmd']}")
+    print(f"{indentString()}    {Fore.GREEN}PASS: {testvals['cmd']}{Style.RESET_ALL}")
 
 def checkFileExists(fn : str) :
     if os.path.exists(fn) :
-        print(f"    PASS: (File exists - '{fn}')")
+        print(f"{indentString()}    {Fore.GREEN}PASS: (File exists - '{fn}'){Style.RESET_ALL}")
     else:
-        print(f"    FAIL: (File missing - '{fn}')")
+        print(f"{indentString()}    {Fore.RED}FAIL: (File missing - '{fn}'){Style.RESET_ALL}")
         endTest(False)
 
 def checkFileWriteable(fn : str) :
     if os.access(fn, os.W_OK) :
-        print(f"    PASS: (File writeable - '{fn}')")
+        print(f"{indentString()}    {Fore.GREEN}PASS: (File writeable - '{fn}'){Style.RESET_ALL}")
     else:
-        print(f"    FAIL: (File not writeable - '{fn}')")
+        print(f"{indentString()}    {Fore.RED}FAIL: (File not writeable - '{fn}'){Style.RESET_ALL}")
         endTest(False)
 
 def checkFileReadOnly(fn : str) :
     if not os.access(fn, os.W_OK) :
-        print(f"    PASS: (File read only - '{fn}')")
+        print(f"{indentString()}    {Fore.GREEN}PASS: (File read only - '{fn}'){Style.RESET_ALL}")
     else:
-        print(f"    FAIL: (File writeable - '{fn}')")
+        print(f"{indentString()}    {Fore.RED}FAIL: (File writeable - '{fn}'){Style.RESET_ALL}")
         endTest(False)
+
+def variantBegin(msg : str) :
+    global g_indentLevel
+    print(f"{indentString()}    {Fore.YELLOW}Executing variant: {msg}{Style.RESET_ALL}")
+    g_indentLevel += 1
+
+def variantEnd() :
+    global g_indentLevel
+    g_indentLevel -= 1

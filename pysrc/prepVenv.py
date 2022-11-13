@@ -49,7 +49,7 @@ try:
         print('ERROR: Cannot "prepare" the execution environment when it is activated')
         os._exit(1)
 
-    envb = venv.EnvBuilder(system_site_packages=False, with_pip=True, upgrade=True, clear=True)
+    envb = venv.EnvBuilder(system_site_packages=False, with_pip=True, upgrade=True, clear=False)
     envb.create(sys.argv[1])
 except Exception as e:
     print("ERROR: Prepare command caught exception:")
