@@ -8,7 +8,6 @@ import getpass
 import os
 import pathlib
 import platform
-import requests
 import shutil
 import sys
 import time
