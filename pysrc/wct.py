@@ -105,45 +105,44 @@ def validateCommandStruct(v) :
         return False
 
     for k in v :
-        match k:
-            case "cmd" :
-                if v[k] is not None and (not isListOfStrings(v[k]) or len(v[k]) == 0) :
-                    print(f"    WARN: Must have a valid 'cmd' value which contains a list of strings.")
-                    return False
-
-            case "expect_stdout" :
-                if v[k] is not None and (not isStringOrList(v[k]) or len(v[k]) == 0) :
-                    print(f"    WARN: If 'expect_stdout' is not None, it must be a valid string, or list of strings.")
-                    return False
-
-            case "dontexpect_stdout" :
-                if v[k] is not None and (not isStringOrList(v[k]) or len(v[k]) == 0) :
-                    print(f"    WARN: If 'dontexpect_stdout' is not None, it must be a valid string, or list of strings.")
-                    return False
-
-            case "expect_stderr" :
-                if v[k] is not None and (not isStringOrList(v[k]) or len(v[k]) == 0) :
-                    print(f"    WARN: If 'expect_stderr' is not None, it must be a valid string, or list of strings.")
-                    return False
-
-            case "dontexpect_stderr" :
-                if v[k] is not None and (not isStringOrList(v[k]) or len(v[k]) == 0) :
-                    print(f"    WARN: If 'dontexpect_stderr' is not None, it must be a valid string, or list of strings.")
-                    return False
-
-            case "expect_returncode" :
-                if v[k] is not None and (not isInteger(v[k])) :
-                    print(f"    WARN: If 'expect_returncode' is not None, it must be a valid integer.")
-                    return False
-
-            case "dontexpect_returncode" :
-                if v[k] is not None and (not isInteger(v[k])) :
-                    print(f"    WARN: If 'dontexpect_returncode' is not None, it must be a valid integer.")
-                    return False
-
-            case _:
-                print(f"    WARN: Unrecognized entry '{k}' found. ")
+        if k == "cmd" :
+            if v[k] is not None and (not isListOfStrings(v[k]) or len(v[k]) == 0) :
+                print(f"    WARN: Must have a valid 'cmd' value which contains a list of strings.")
                 return False
+
+        elif k == "expect_stdout" :
+            if v[k] is not None and (not isStringOrList(v[k]) or len(v[k]) == 0) :
+                print(f"    WARN: If 'expect_stdout' is not None, it must be a valid string, or list of strings.")
+                return False
+
+        elif k == "dontexpect_stdout" :
+            if v[k] is not None and (not isStringOrList(v[k]) or len(v[k]) == 0) :
+                print(f"    WARN: If 'dontexpect_stdout' is not None, it must be a valid string, or list of strings.")
+                return False
+
+        elif k ==  "expect_stderr" :
+            if v[k] is not None and (not isStringOrList(v[k]) or len(v[k]) == 0) :
+                print(f"    WARN: If 'expect_stderr' is not None, it must be a valid string, or list of strings.")
+                return False
+
+        elif k ==  "dontexpect_stderr" :
+            if v[k] is not None and (not isStringOrList(v[k]) or len(v[k]) == 0) :
+                print(f"    WARN: If 'dontexpect_stderr' is not None, it must be a valid string, or list of strings.")
+                return False
+
+        elif k == "expect_returncode" :
+            if v[k] is not None and (not isInteger(v[k])) :
+                print(f"    WARN: If 'expect_returncode' is not None, it must be a valid integer.")
+                return False
+
+        elif k == "dontexpect_returncode" :
+            if v[k] is not None and (not isInteger(v[k])) :
+                print(f"    WARN: If 'dontexpect_returncode' is not None, it must be a valid integer.")
+                return False
+
+        else :
+            print(f"    WARN: Unrecognized entry '{k}' found. ")
+            return False
 
     return True
 

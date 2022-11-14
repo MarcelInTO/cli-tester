@@ -113,6 +113,8 @@ if platform.system() == "Windows":
     pPath = str(g_venvPath.joinpath("Scripts/python"))
 elif platform.system() == "Linux":
     pPath = str(g_venvPath.joinpath("bin/python"))
+elif platform.system() == "Darwin":
+    pPath = str(g_venvPath.joinpath("bin/python"))
 else:
     printError(f"Unsupported platform '{platform.system()}'")
     os._exit(3)
