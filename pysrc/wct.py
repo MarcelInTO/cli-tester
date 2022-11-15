@@ -1,4 +1,5 @@
 import os
+import platform
 import re
 import subprocess
 
@@ -22,6 +23,11 @@ def indentString() -> str :
 # Useful utilities used internall in this module but also available to the 
 # user when writing tests
 ##############################################################################
+
+def operatingSystem() -> str :
+    global platform
+    return platform.system()
+
 
 def isString(v) :
     return isinstance(v, str)
@@ -147,7 +153,7 @@ def validateCommandStruct(v) :
     return True
 
 
-def checkRunCommand(testvals) :
+def checkRunCommand(testvals, useShell = False) :
     firstfail = True
     def firstFailFunc() :
         nonlocal firstfail
@@ -168,7 +174,7 @@ def checkRunCommand(testvals) :
         print(f"        invalid test command descriptor")
         endTest(False)
 
-    result = subprocess.run(testvals["cmd"], capture_output=True)
+    result = subprocess.run(testvals["cmd"], capture_output=True, shell=useShell)
 
     oklist = []
     if entryExists("expect_returncode") :
@@ -220,6 +226,11 @@ def checkRunCommand(testvals) :
         endTest(False)
 
     print(f"{indentString()}    {Fore.GREEN}PASS: {testvals['cmd']}{Style.RESET_ALL}")
+
+
+def checkRunShellCommand(testvals) :
+    return checkRunCommand(testvals, True)
+
 
 def checkFileExists(fn : str) :
     if os.path.exists(fn) :
