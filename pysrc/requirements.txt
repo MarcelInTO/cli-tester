@@ -1,2 +1,8 @@
-requests==2.24.0
+certifi==2021.10.8
+charset-normalizer==2.0.12
 colorama==0.4.4
+idna==3.3
+python-gitlab==3.11.0
+requests==2.27.1
+requests-toolbelt==0.9.1
+urllib3==1.26.9
