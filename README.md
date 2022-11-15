@@ -29,3 +29,15 @@ Regex generation. These functions generate regular expressions for common situat
     xBeginningOfLine(v)
     xFullLine(v)
     xLastFullLine(v)
+
+## WvsLib functions
+
+The wvslib module is technically not part of WCT, but rather a set of WVS specific utilities that make testing of WVS projects simpler.
+
+    init()
+
+    testForOK()
+    testForERR()
+
+    checkForkRepo(name : str) -> str
+    checkDeleteRepo(name : str, silent=False)
