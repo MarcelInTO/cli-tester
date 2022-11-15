@@ -9,44 +9,38 @@ from colorama import Fore, Back, Style
 # Internal utilities for formatted output
 ##############################################################################
 
-g_indentLevel = 1
+_g_indentLevel = 1
 
-def indentString() -> str :
-    global g_indentLevel
+def _doIndentString() -> str :
+    global _g_indentLevel
     ret = ""
-    for x in range(g_indentLevel) :
+    for x in range(_g_indentLevel) :
         ret += "    "
     return ret
 
 
 ##############################################################################
-# Useful utilities used internall in this module but also available to the 
-# user when writing tests
+# Useful utilities used internally
 ##############################################################################
 
-def operatingSystem() -> str :
-    global platform
-    return platform.system()
-
-
-def isString(v) :
+def _isString(v) :
     return isinstance(v, str)
 
 
-def isListOfStrings(v) :
+def _isListOfStrings(v) :
     if hasattr(v, '__len__') and (not isinstance(v, str)):
         for x in v :
-            if not isString(x) :
+            if not _isString(x) :
                 return False
         return True
     return False
 
 
-def isStringOrList(v) :
-    return isString(v) or isListOfStrings(v)
+def _isStringOrList(v) :
+    return _isString(v) or _isListOfStrings(v)
 
 
-def isInteger(n) :
+def _isInteger(n) :
     if isinstance(n, int):
         return True
     if isinstance(n, float):
@@ -54,29 +48,85 @@ def isInteger(n) :
     return False
 
 
-def matchBasic(pattern, theString):
+def _matchBasic(pattern, theString):
     return re.search(pattern, theString, flags=re.MULTILINE) is not None
 
 
-def matchAll(patternList, theString) :
-    if isListOfStrings(patternList) :
+def _matchAll(patternList, theString) :
+    if _isListOfStrings(patternList) :
         for x in patternList:
-            if not matchBasic(x, theString) :
+            if not _matchBasic(x, theString) :
                 return False
         return True
     else:
-        return matchBasic(patternList, theString)
+        return _matchBasic(patternList, theString)
 
 
-def matchOne(patternList, theString) :
-    if isListOfStrings(patternList) :
+def _matchOne(patternList, theString) :
+    if _isListOfStrings(patternList) :
         for x in patternList:
-            if matchBasic(x, theString) :
+            if _matchBasic(x, theString) :
                 return True
         return False
     else:
-        return matchBasic(patternList, theString)
+        return _matchBasic(patternList, theString)
 
+
+def _endTest(status : bool):
+    quit()
+
+
+def _validateCommandStruct(v) :
+    if not isinstance(v, dict) :
+        print(f"WARNING: invalid command descriptor. Must be a dict.")
+        return False
+
+    for k in v :
+        if k == "cmd" :
+            if v[k] is not None and (not _isListOfStrings(v[k]) or len(v[k]) == 0) :
+                print(f"    WARN: Must have a valid 'cmd' value which contains a list of strings.")
+                return False
+
+        elif k == "expect_stdout" :
+            if v[k] is not None and (not _isStringOrList(v[k]) or len(v[k]) == 0) :
+                print(f"    WARN: If 'expect_stdout' is not None, it must be a valid string, or list of strings.")
+                return False
+
+        elif k == "dontexpect_stdout" :
+            if v[k] is not None and (not _isStringOrList(v[k]) or len(v[k]) == 0) :
+                print(f"    WARN: If 'dontexpect_stdout' is not None, it must be a valid string, or list of strings.")
+                return False
+
+        elif k ==  "expect_stderr" :
+            if v[k] is not None and (not _isStringOrList(v[k]) or len(v[k]) == 0) :
+                print(f"    WARN: If 'expect_stderr' is not None, it must be a valid string, or list of strings.")
+                return False
+
+        elif k ==  "dontexpect_stderr" :
+            if v[k] is not None and (not _isStringOrList(v[k]) or len(v[k]) == 0) :
+                print(f"    WARN: If 'dontexpect_stderr' is not None, it must be a valid string, or list of strings.")
+                return False
+
+        elif k == "expect_returncode" :
+            if v[k] is not None and (not _isInteger(v[k])) :
+                print(f"    WARN: If 'expect_returncode' is not None, it must be a valid integer.")
+                return False
+
+        elif k == "dontexpect_returncode" :
+            if v[k] is not None and (not _isInteger(v[k])) :
+                print(f"    WARN: If 'dontexpect_returncode' is not None, it must be a valid integer.")
+                return False
+
+        else :
+            print(f"    WARN: Unrecognized entry '{k}' found. ")
+            return False
+
+    return True
+
+
+##############################################################################
+# Public functions for generating regex
+##############################################################################
 
 def xAnywhere(v) :
     return re.escape(v)
@@ -97,60 +147,13 @@ def xBeginningOfLine(v) :
 # Core functions for writing/controlling tests
 ##############################################################################
 
-def endTest(status : bool):
-    quit()
+def operatingSystem() -> str :
+    global platform
+    return platform.system()
 
 def failTest(message : str):
-    print(f"{indentString()}    {Fore.RED}FAIL: ({message}){Style.RESET_ALL}")
+    print(f"{_doIndentString()}    {Fore.RED}FAIL: ({message}){Style.RESET_ALL}")
     quit()
-
-
-def validateCommandStruct(v) :
-    if not isinstance(v, dict) :
-        print(f"WARNING: invalid command descriptor. Must be a dict.")
-        return False
-
-    for k in v :
-        if k == "cmd" :
-            if v[k] is not None and (not isListOfStrings(v[k]) or len(v[k]) == 0) :
-                print(f"    WARN: Must have a valid 'cmd' value which contains a list of strings.")
-                return False
-
-        elif k == "expect_stdout" :
-            if v[k] is not None and (not isStringOrList(v[k]) or len(v[k]) == 0) :
-                print(f"    WARN: If 'expect_stdout' is not None, it must be a valid string, or list of strings.")
-                return False
-
-        elif k == "dontexpect_stdout" :
-            if v[k] is not None and (not isStringOrList(v[k]) or len(v[k]) == 0) :
-                print(f"    WARN: If 'dontexpect_stdout' is not None, it must be a valid string, or list of strings.")
-                return False
-
-        elif k ==  "expect_stderr" :
-            if v[k] is not None and (not isStringOrList(v[k]) or len(v[k]) == 0) :
-                print(f"    WARN: If 'expect_stderr' is not None, it must be a valid string, or list of strings.")
-                return False
-
-        elif k ==  "dontexpect_stderr" :
-            if v[k] is not None and (not isStringOrList(v[k]) or len(v[k]) == 0) :
-                print(f"    WARN: If 'dontexpect_stderr' is not None, it must be a valid string, or list of strings.")
-                return False
-
-        elif k == "expect_returncode" :
-            if v[k] is not None and (not isInteger(v[k])) :
-                print(f"    WARN: If 'expect_returncode' is not None, it must be a valid integer.")
-                return False
-
-        elif k == "dontexpect_returncode" :
-            if v[k] is not None and (not isInteger(v[k])) :
-                print(f"    WARN: If 'dontexpect_returncode' is not None, it must be a valid integer.")
-                return False
-
-        else :
-            print(f"    WARN: Unrecognized entry '{k}' found. ")
-            return False
-
-    return True
 
 
 def checkRunCommand(testvals, useShell = False) :
@@ -159,7 +162,7 @@ def checkRunCommand(testvals, useShell = False) :
         nonlocal firstfail
         if firstfail:
             firstfail = False
-            print(f"{indentString()}    {Fore.RED}FAIL: {testvals['cmd']}{Style.RESET_ALL}")
+            print(f"{_doIndentString()}    {Fore.RED}FAIL: {testvals['cmd']}{Style.RESET_ALL}")
 
     def entryExists(k) :
         nonlocal testvals
@@ -169,10 +172,10 @@ def checkRunCommand(testvals, useShell = False) :
     # However, if its valid, we run through all the checks before failing so that the
     # user can get a list of all the errors at once.
 
-    if not validateCommandStruct(testvals) :
+    if not _validateCommandStruct(testvals) :
         firstFailFunc()
         print(f"        invalid test command descriptor")
-        endTest(False)
+        _endTest(False)
 
     result = subprocess.run(testvals["cmd"], capture_output=True, shell=useShell)
 
@@ -180,52 +183,52 @@ def checkRunCommand(testvals, useShell = False) :
     if entryExists("expect_returncode") :
         if result.returncode != testvals["expect_returncode"] :
             firstFailFunc()
-            print(f"{indentString()}        {Fore.RED}BAD:  expect_returncode [got {result.returncode}, expected {testvals['expect_returncode']}]{Style.RESET_ALL}")
+            print(f"{_doIndentString()}        {Fore.RED}BAD:  expect_returncode [got {result.returncode}, expected {testvals['expect_returncode']}]{Style.RESET_ALL}")
         else:
             oklist.append("expect_returncode")
 
     if entryExists("dontexpect_returncode") :
         if result.returncode == testvals["dontexpect_returncode"] :
             firstFailFunc()
-            print(f"{indentString()}        {Fore.RED}BAD:  dontexpect_returncode{Style.RESET_ALL}")
+            print(f"{_doIndentString()}        {Fore.RED}BAD:  dontexpect_returncode{Style.RESET_ALL}")
         else:
             oklist.append("dontexpect_returncode")
 
     if entryExists("expect_stdout") :
-        if not matchAll(testvals["expect_stdout"], result.stdout.decode('utf-8')):
+        if not _matchAll(testvals["expect_stdout"], result.stdout.decode('utf-8')):
             firstFailFunc()
-            print(f"{indentString()}        {Fore.RED}BAD:  expect_stdout{Style.RESET_ALL}")
+            print(f"{_doIndentString()}        {Fore.RED}BAD:  expect_stdout{Style.RESET_ALL}")
         else:
             oklist.append("expect_stdout")
 
     if entryExists("dontexpect_stdout") :
-        if matchOne(testvals["dontexpect_stdout"], result.stdout.decode('utf-8')) :
+        if _matchOne(testvals["dontexpect_stdout"], result.stdout.decode('utf-8')) :
             firstFailFunc()
-            print(f"{indentString()}        {Fore.RED}BAD:  dontexpect_stdout{Style.RESET_ALL}")
+            print(f"{_doIndentString()}        {Fore.RED}BAD:  dontexpect_stdout{Style.RESET_ALL}")
         else:
             oklist.append("dontexpect_stdout")
 
     if entryExists("expect_stderr") :
-        if not matchAll(testvals["expect_stderr"], result.stderr.decode('utf-8')):
+        if not _matchAll(testvals["expect_stderr"], result.stderr.decode('utf-8')):
             firstFailFunc()
-            print(f"{indentString()}        {Fore.RED}BAD:  expect_stderr{Style.RESET_ALL}")
+            print(f"{_doIndentString()}        {Fore.RED}BAD:  expect_stderr{Style.RESET_ALL}")
         else:
             oklist.append("expect_stderr")
 
     if entryExists("dontexpect_stderr") :
-        if matchOne(testvals["dontexpect_stderr"], result.stderr.decode('utf-8')):
+        if _matchOne(testvals["dontexpect_stderr"], result.stderr.decode('utf-8')):
             firstFailFunc()
-            print(f"{indentString()}        {Fore.RED}BAD:  dontexpect_stderr{Style.RESET_ALL}")
+            print(f"{_doIndentString()}        {Fore.RED}BAD:  dontexpect_stderr{Style.RESET_ALL}")
         else:
             oklist.append("dontexpect_stderr")
 
     if not firstfail :
         for x in oklist :
-            print(f"{indentString()}        {Fore.GREEN}OK:   {x}{Style.RESET_ALL}")
+            print(f"{_doIndentString()}        {Fore.GREEN}OK:   {x}{Style.RESET_ALL}")
 
-        endTest(False)
+        _endTest(False)
 
-    print(f"{indentString()}    {Fore.GREEN}PASS: {testvals['cmd']}{Style.RESET_ALL}")
+    print(f"{_doIndentString()}    {Fore.GREEN}PASS: {testvals['cmd']}{Style.RESET_ALL}")
 
 
 def checkRunShellCommand(testvals) :
@@ -234,30 +237,30 @@ def checkRunShellCommand(testvals) :
 
 def checkFileExists(fn : str) :
     if os.path.exists(fn) :
-        print(f"{indentString()}    {Fore.GREEN}PASS: (File exists - '{fn}'){Style.RESET_ALL}")
+        print(f"{_doIndentString()}    {Fore.GREEN}PASS: (File exists - '{fn}'){Style.RESET_ALL}")
     else:
-        print(f"{indentString()}    {Fore.RED}FAIL: (File missing - '{fn}'){Style.RESET_ALL}")
-        endTest(False)
+        print(f"{_doIndentString()}    {Fore.RED}FAIL: (File missing - '{fn}'){Style.RESET_ALL}")
+        _endTest(False)
 
 def checkFileWriteable(fn : str) :
     if os.access(fn, os.W_OK) :
-        print(f"{indentString()}    {Fore.GREEN}PASS: (File writeable - '{fn}'){Style.RESET_ALL}")
+        print(f"{_doIndentString()}    {Fore.GREEN}PASS: (File writeable - '{fn}'){Style.RESET_ALL}")
     else:
-        print(f"{indentString()}    {Fore.RED}FAIL: (File not writeable - '{fn}'){Style.RESET_ALL}")
-        endTest(False)
+        print(f"{_doIndentString()}    {Fore.RED}FAIL: (File not writeable - '{fn}'){Style.RESET_ALL}")
+        _endTest(False)
 
 def checkFileReadOnly(fn : str) :
     if not os.access(fn, os.W_OK) :
-        print(f"{indentString()}    {Fore.GREEN}PASS: (File read only - '{fn}'){Style.RESET_ALL}")
+        print(f"{_doIndentString()}    {Fore.GREEN}PASS: (File read only - '{fn}'){Style.RESET_ALL}")
     else:
-        print(f"{indentString()}    {Fore.RED}FAIL: (File writeable - '{fn}'){Style.RESET_ALL}")
-        endTest(False)
+        print(f"{_doIndentString()}    {Fore.RED}FAIL: (File writeable - '{fn}'){Style.RESET_ALL}")
+        _endTest(False)
 
 def variantBegin(msg : str) :
-    global g_indentLevel
-    print(f"{indentString()}    {Fore.YELLOW}Executing variant: {msg}{Style.RESET_ALL}")
-    g_indentLevel += 1
+    global _g_indentLevel
+    print(f"{_doIndentString()}    {Fore.YELLOW}Executing variant: {msg}{Style.RESET_ALL}")
+    _g_indentLevel += 1
 
 def variantEnd() :
-    global g_indentLevel
-    g_indentLevel -= 1
+    global _g_indentLevel
+    _g_indentLevel -= 1
