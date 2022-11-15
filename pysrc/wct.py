@@ -4,6 +4,7 @@ import re
 import subprocess
 
 from colorama import Fore, Back, Style
+from typing import Tuple
 
 ##############################################################################
 # Internal utilities for formatted output
@@ -48,16 +49,17 @@ def _isInteger(n) :
     return False
 
 
-def _matchBasic(pattern, theString):
-    return re.search(pattern, theString, flags=re.MULTILINE) is not None
+def _matchBasic(pattern, theString) -> Tuple[bool, str]:
+    return re.search(pattern, theString, flags=re.MULTILINE) is not None, pattern
 
 
-def _matchAll(patternList, theString) :
+def _matchAll(patternList, theString) -> Tuple[bool, str]:
     if _isListOfStrings(patternList) :
         for x in patternList:
-            if not _matchBasic(x, theString) :
-                return False
-        return True
+            ret, pat =  _matchBasic(x, theString)
+            if not ret :
+                return False, pat
+        return True, "All"
     else:
         return _matchBasic(patternList, theString)
 
@@ -65,9 +67,10 @@ def _matchAll(patternList, theString) :
 def _matchOne(patternList, theString) :
     if _isListOfStrings(patternList) :
         for x in patternList:
-            if _matchBasic(x, theString) :
-                return True
-        return False
+            ret, pat =  _matchBasic(x, theString)
+            if ret :
+                return True, pat
+        return False, "None"
     else:
         return _matchBasic(patternList, theString)
 
@@ -195,30 +198,34 @@ def checkRunCommand(testvals, useShell = False) :
             oklist.append("dontexpect_returncode")
 
     if entryExists("expect_stdout") :
-        if not _matchAll(testvals["expect_stdout"], result.stdout.decode('utf-8')):
+        ret, pat = _matchAll(testvals["expect_stdout"], result.stdout.decode('utf-8'))
+        if not ret :
             firstFailFunc()
-            print(f"{_doIndentString()}        {Fore.RED}BAD:  expect_stdout{Style.RESET_ALL}")
+            print(f"{_doIndentString()}        {Fore.RED}BAD:  expect_stdout [failed regex r\"{pat}\"]{Style.RESET_ALL}")
         else:
             oklist.append("expect_stdout")
 
     if entryExists("dontexpect_stdout") :
-        if _matchOne(testvals["dontexpect_stdout"], result.stdout.decode('utf-8')) :
+        ret, pat = _matchOne(testvals["dontexpect_stdout"], result.stdout.decode('utf-8'))
+        if  ret :
             firstFailFunc()
-            print(f"{_doIndentString()}        {Fore.RED}BAD:  dontexpect_stdout{Style.RESET_ALL}")
+            print(f"{_doIndentString()}        {Fore.RED}BAD:  dontexpect_stdout [failed regex r\"{pat}\"]{Style.RESET_ALL}")
         else:
             oklist.append("dontexpect_stdout")
 
     if entryExists("expect_stderr") :
-        if not _matchAll(testvals["expect_stderr"], result.stderr.decode('utf-8')):
+        ret, pat = _matchAll(testvals["expect_stderr"], result.stderr.decode('utf-8'))
+        if not ret :
             firstFailFunc()
-            print(f"{_doIndentString()}        {Fore.RED}BAD:  expect_stderr{Style.RESET_ALL}")
+            print(f"{_doIndentString()}        {Fore.RED}BAD:  expect_stderr [failed regex r\"{pat}\"]{Style.RESET_ALL}")
         else:
             oklist.append("expect_stderr")
 
     if entryExists("dontexpect_stderr") :
-        if _matchOne(testvals["dontexpect_stderr"], result.stderr.decode('utf-8')):
+        ret, pat = _matchOne(testvals["dontexpect_stderr"], result.stderr.decode('utf-8'))
+        if ret :
             firstFailFunc()
-            print(f"{_doIndentString()}        {Fore.RED}BAD:  dontexpect_stderr{Style.RESET_ALL}")
+            print(f"{_doIndentString()}        {Fore.RED}BAD:  dontexpect_stderr [failed regex r\"{pat}\"]{Style.RESET_ALL}")
         else:
             oklist.append("dontexpect_stderr")
 
