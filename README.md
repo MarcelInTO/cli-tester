@@ -34,6 +34,8 @@ Regex generation. These functions generate regular expressions for common situat
 
 The wvslib module is technically not part of WCT, but rather a set of WVS specific utilities that make testing of WVS projects simpler.
 
+***In order for these functions to work in your tests, you need to make sure that you have an Environment variable called*** **WCT_WVSLIB_AUTHTOKEN** ***set to your PAT.***
+
     init()
 
     testForOK()

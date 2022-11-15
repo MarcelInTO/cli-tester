@@ -2,6 +2,7 @@
 
 import atexit
 import gitlab
+import os
 import wct
 
 from typing import Any
@@ -18,10 +19,12 @@ def init() :
     global g_gl
     g_gl = None
     try:
-        g_gl =  gitlab.Gitlab(url='https://wvs.io', private_token='Sh_xiXsC1xk2yzczk8Rh')
+        token = os.getenv("WCT_WVSLIB_AUTHTOKEN")
+        if token is None or token == "":
+            wct.failTest("No WVS token. Env variable 'WCT_WVSLIB_AUTHTOKEN' is not set")   
+        g_gl =  gitlab.Gitlab(url='https://wvs.io', private_token=token)
     except Exception:
-        print("ERROR: Could not authenticate connection to wvs.io.")
-        exit(-1)
+        wct.failTest("Could not authenticate connection to wvs.io.")
 
     atexit.register(_doExitCleanup)
 
@@ -34,9 +37,7 @@ def _doExitCleanup() :
 def _doCheckInit() :
     global os
     if g_gl is None :
-        print("ERROR: Use of unititialized wvs interface in test.")
-        print("       make sure to call wvslib.init() at beginning of test script")
-        exit(-1)
+        wct.failTest("Use of unititialized wvs interface in test.")
 
 
 def testForOK() -> str :
