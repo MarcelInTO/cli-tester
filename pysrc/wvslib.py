@@ -54,13 +54,18 @@ def checkForkRepo(name : str) -> str :
     cloneName, err = _doForkRepo(name)
     if err is not None:
         wct.failTest(err)
+    else:
+        wct.passTest(f"Fork repo '{name}'")
     return cloneName
 
 
 def checkDeleteRepo(name : str, silent=False) :
     err = _doDeletetRepo(name)
-    if not silent and err is not None:
-        wct.failTest(err)
+    if not silent:
+        if err is not None:
+            wct.failTest(err)
+        else:
+            wct.passTest(f"Delete repo '{name}'")
 
 
 def _doForkRepo(sourceRepo : str) -> Tuple[Any, str]:
@@ -99,5 +104,9 @@ def _doDeletetRepo(repo : str) -> str :
     except Exception:
         return None, "Exception during deleting forked project"
 
-    g_tempRepos.remove(repo)
+    # The repo might not have been created by us, in which case
+    # it will not be in the cleanup list
+    if repo in g_tempRepos: 
+        g_tempRepos.remove(repo)
+
     return None

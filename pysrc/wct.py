@@ -154,9 +154,15 @@ def operatingSystem() -> str :
     global platform
     return platform.system()
 
+
 def failTest(message : str):
     print(f"{_doIndentString()}    {Fore.RED}FAIL: ({message}){Style.RESET_ALL}")
     quit()
+
+
+def passTest(message : str) :
+    print(f"{_doIndentString()}    {Fore.GREEN}PASS: ({message}){Style.RESET_ALL}")
+
 
 
 def checkRunCommand(testvals, useShell = False) :
