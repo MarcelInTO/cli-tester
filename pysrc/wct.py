@@ -1,6 +1,8 @@
 import os
 import platform
 import re
+import shutil
+import stat
 import subprocess
 
 from colorama import Fore, Back, Style
@@ -126,6 +128,10 @@ def _validateCommandStruct(v) :
 
     return True
 
+def _funcDeleteRw(action, name, exc) :
+    global stat
+    os.chmod(name, stat.S_IWRITE)
+    os.remove(name)
 
 ##############################################################################
 # Public functions for generating regex
@@ -153,6 +159,11 @@ def xBeginningOfLine(v) :
 def operatingSystem() -> str :
     global platform
     return platform.system()
+
+def deleteFolder(name : str) :
+    global shutil
+    shutil.rmtree(name, onerror=_funcDeleteRw)
+
 
 
 def failTest(message : str):
