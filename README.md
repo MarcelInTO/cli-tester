@@ -23,6 +23,10 @@ Test control. These functions are utilities for controlling more complex tests.
     variantBegin(msg: str)
     variantEnd()
 
+Filesystem management functions
+
+    deleteFolder(name: str)
+
 Regex generation. These functions generate regular expressions for common situations, so that you don't have to.
 
     xAnywhere(v)
