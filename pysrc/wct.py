@@ -254,6 +254,8 @@ def checkRunCommand(testvals, useShell = False) :
 
     print(f"{_doIndentString()}    {Fore.GREEN}PASS: {testvals['cmd']}{Style.RESET_ALL}")
 
+    return result.returncode, result.stdout.decode('utf-8'), result.stderr.decode('utf-8')
+
 
 def checkRunShellCommand(testvals) :
     return checkRunCommand(testvals, True)

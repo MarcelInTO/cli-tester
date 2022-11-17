@@ -67,6 +67,46 @@ def checkDeleteRepo(name : str, silent=False) :
         else:
             wct.passTest(f"Delete repo '{name}'")
 
+def checkGetRepoName() -> str:
+    code, out, err = wct.checkRunCommand( {    
+        'cmd'                       :   ["git", "config", "--get", "remote.origin.url"],
+        'expect_returncode'         :   0,
+    })
+
+    if out.startswith("git@") :
+        if out.startswith("git@wvs.io:") :
+
+            colon = out.find(":")
+            git = out.rfind(".git")
+
+            if colon < 0 or git < 0 :
+                wct.failTest("could not recognize format of ssh origin")
+
+            trimmedRef = out[colon+1 : git]
+
+            return trimmedRef
+        else :
+            wct.failTest(f"unsupported remote server: '{ref}'" )
+
+    if out.startswith("https://") :
+        noProto = out[8:]
+        firstSlash = noProto.find("/")
+        server = noProto[:firstSlash]
+
+        if server.endswith("wvs.io")  :
+            git = noProto.rfind(noProto, ".git")
+
+            if firstSlash < 0 or git < 0 :
+                wct.failTest("could not recognize format of https origin")
+
+            trimmedRef = noProto[firstSlash+1 : git]
+
+            return trimmedRef
+        else :
+            wct.failTest(f"unsupported remote server: '{ref}")
+
+    wct.failTest(f"unrecognized protocol for remote  '{ref}'")
+
 
 def _doForkRepo(sourceRepo : str) -> Tuple[Any, str]:
     _doCheckInit()
