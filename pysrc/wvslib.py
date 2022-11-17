@@ -108,6 +108,10 @@ def checkGetRepoName() -> str:
     wct.failTest(f"unrecognized protocol for remote  '{ref}'")
 
 
+def addRepoToCleanupList(name : str) :
+    g_tempRepos.append(name)
+
+
 def _doForkRepo(sourceRepo : str) -> Tuple[Any, str]:
     _doCheckInit()
 
