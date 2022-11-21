@@ -3,6 +3,7 @@
 import atexit
 import gitlab
 import os
+import time
 import wct
 
 from typing import Any
@@ -131,6 +132,16 @@ def _doForkRepo(sourceRepo : str) -> Tuple[Any, str]:
         return None, "Exception during forking project"
 
     g_tempRepos.append(forkProject.path_with_namespace)
+
+    # The fork call return asynhronously so we have to keep
+    # querying import_status until that succeeds
+    fp = g_gl.projects.get(forkProject.path_with_namespace)
+    fp.refresh()
+    while fp.import_status != 'finished':
+        time.sleep(1)
+        fp.refresh()
+
+
     return forkProject.path_with_namespace, None
 
 
