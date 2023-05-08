@@ -1,3 +1,4 @@
+import json
 import os
 import platform
 import re
@@ -38,6 +39,22 @@ def _isListOfStrings(v) :
         return True
     return False
 
+def _isListOfJsonFields(v) :
+    if hasattr(v, '__len__') :
+        for x in v :
+            if not isinstance(x, dict):
+                return False
+            if not "field" in x.keys() :
+                return False
+            if not "test_type" in x.keys() :
+                return False
+            else :
+                if x["test_type"] not in ["unorderedArrayMatch", "valueEqual", "valueNotEqual"] :
+                    return False
+            if not "test_value" in x.keys() :
+                return False
+        return True
+    return False
 
 def _isStringOrList(v) :
     return _isString(v) or _isListOfStrings(v)
@@ -97,6 +114,11 @@ def _validateCommandStruct(v) :
                 print(f"    WARN: If 'expect_stdout' is not None, it must be a valid string, or list of strings.")
                 return False
 
+        elif k == "check_json_stdout" :
+            if v[k] is not None and (not _isListOfJsonFields(v[k]) or len(v[k]) == 0) :
+                print(f"    WARN: If 'check_json_stdout' is not None, it must be a valid list of json field tests.")
+                return False
+
         elif k == "dontexpect_stdout" :
             if v[k] is not None and (not _isStringOrList(v[k]) or len(v[k]) == 0) :
                 print(f"    WARN: If 'dontexpect_stdout' is not None, it must be a valid string, or list of strings.")
@@ -132,6 +154,32 @@ def _funcDeleteRw(action, name, exc) :
     global stat
     os.chmod(name, stat.S_IWRITE)
     os.remove(name)
+
+def _findJsonField(inJsonString : str, inFieldSpec : str):
+    data = json.loads(inJsonString)
+
+    fieldNames = inFieldSpec.split('.')
+    current = data
+    for f in fieldNames:
+        if f in current:
+            current = current[f]
+        else:
+            return False, None
+
+    return True, current
+
+def _getJsonField(jsonString : str, field : str) -> str :
+    exists, value = _findJsonField(jsonString, field)
+    if exists :
+        return value
+    else:
+        return ""
+
+def _getJsonFieldExists(jsonString : str, field : str) -> bool :
+    exists, value = _findJsonField(jsonString, field)
+    return exists
+
+
 
 ##############################################################################
 # Public functions for generating regex
@@ -221,6 +269,42 @@ def checkRunCommand(testvals, useShell = False) :
             print(f"{_doIndentString()}        {Fore.RED}BAD:  expect_stdout [failed regex r\"{pat}\"]{Style.RESET_ALL}")
         else:
             oklist.append("expect_stdout")
+
+    if entryExists("check_json_stdout") :
+        allOk = True
+        for ftest in testvals["check_json_stdout"] :
+            ftestField = ftest['field']
+            ftestType = ftest['test_type']
+            ftestValue = ftest['test_value']
+
+            resultFieldExists, resultFieldValue = _findJsonField(result.stdout.decode('utf-8'), ftestField)
+            if resultFieldExists:
+                if ftestType == "unorderedArrayMatch" :
+                    if (set(ftestValue) != set(resultFieldValue)) :
+                        firstFailFunc()
+                        print(f"{_doIndentString()}        {Fore.RED}BAD:  check_json_stdout [sets do not match for field '{ftestField}'")
+                        allOk = False
+                elif ftestType == "valueEqual" :
+                    if (ftestValue != resultFieldValue) :
+                        firstFailFunc()
+                        print(f"{_doIndentString()}        {Fore.RED}BAD:  check_json_stdout [values do not match for field '{ftestField}'")
+                        allOk = False
+                elif ftestType == "valueNotEqual" :
+                    if (ftestValue == resultFieldValue) :
+                        firstFailFunc()
+                        print(f"{_doIndentString()}        {Fore.RED}BAD:  check_json_stdout [values match for field '{ftestField}'")
+                        allOk = False
+                else:
+                    firstFailFunc()
+                    print(f"{_doIndentString()}        {Fore.RED}BAD:  check_json_stdout [invalid test type '{ftestType}'")
+                    allOk = False
+            else:
+                firstFailFunc()
+                print(f"{_doIndentString()}        {Fore.RED}BAD:  check_json_stdout [invalid field name '{ftest['field']}'")
+                allOk = False
+        if allOk :
+            oklist.append("check_json_stdout")
+
 
     if entryExists("dontexpect_stdout") :
         ret, pat = _matchOne(testvals["dontexpect_stdout"], result.stdout.decode('utf-8'))

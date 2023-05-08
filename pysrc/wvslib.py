@@ -29,6 +29,8 @@ def init() :
 
     atexit.register(_doExitCleanup)
 
+def getInterface() :
+    return g_gl
 
 def _doExitCleanup() :
     for x in g_tempRepos :
