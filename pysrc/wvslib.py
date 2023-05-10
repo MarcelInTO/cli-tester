@@ -114,6 +114,17 @@ def checkGetRepoName() -> str:
 def addRepoToCleanupList(name : str) :
     g_tempRepos.append(name)
 
+def checkValidateV2Project():
+    wct.checkRunCommand( {    
+        'cmd'                       :   ["wvs", "--v2", "project", "status2"],
+        'dontexpect_stdout'             :   [
+                                            wct.xLastFullLine("OK"),
+                                        ],
+        'expect_stderr'         :   [
+                                            wct.xBeginningOfLine("Error:"),
+                                            wct.xLastFullLine("ERR")
+                                        ],
+    })
 
 def _doForkRepo(sourceRepo : str) -> Tuple[Any, str]:
     _doCheckInit()
