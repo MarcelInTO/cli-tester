@@ -10,7 +10,8 @@ As many tests can be listed on the same command line as desired. Wildcard patter
 
 These check... functions all execute some action, report on failure, and terminate that one test if a failure is encountered. If you use one of these functions, it is not necessary to check a return value. If your script continues, the function succeeded.
 
-    checkFileExists(fn: str)
+    checkPathExists(fn: str)
+    checkPathNotExists(fn: str)
     checkFileReadOnly(fn: str)
     checkFileWriteable(fn: str)
     checkRunCommand(testvals, useShell=False)

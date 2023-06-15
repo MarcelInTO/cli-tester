@@ -33,8 +33,8 @@ def getInterface() :
     return g_gl
 
 def _doExitCleanup() :
-    for x in g_tempRepos :
-        checkDeleteRepo(x, True)
+    while len(g_tempRepos) > 0 :
+        checkDeleteRepo(g_tempRepos[0], True)
 
 
 def _doCheckInit() :
@@ -117,10 +117,10 @@ def addRepoToCleanupList(name : str) :
 def checkValidateV2Project():
     wct.checkRunCommand( {    
         'cmd'                       :   ["wvs", "--v2", "project", "status2"],
-        'dontexpect_stdout'             :   [
+        'expect_stdout'             :   [
                                             wct.xLastFullLine("OK"),
                                         ],
-        'expect_stderr'         :   [
+        'dontexpect_stderr'         :   [
                                             wct.xBeginningOfLine("Error:"),
                                             wct.xLastFullLine("ERR")
                                         ],
