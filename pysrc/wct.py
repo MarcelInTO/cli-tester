@@ -345,12 +345,20 @@ def checkRunShellCommand(testvals) :
     return checkRunCommand(testvals, True)
 
 
-def checkFileExists(fn : str) :
+def checkPathExists(fn : str) :
     if os.path.exists(fn) :
         print(f"{_doIndentString()}    {Fore.GREEN}PASS: (File exists - '{fn}'){Style.RESET_ALL}")
     else:
         print(f"{_doIndentString()}    {Fore.RED}FAIL: (File missing - '{fn}'){Style.RESET_ALL}")
         _endTest(False)
+
+def checkPathNotExists(fn : str) :
+    if not os.path.exists(fn) :
+        print(f"{_doIndentString()}    {Fore.GREEN}PASS: (File missing - '{fn}'){Style.RESET_ALL}")
+    else:
+        print(f"{_doIndentString()}    {Fore.RED}FAIL: (File exists - '{fn}'){Style.RESET_ALL}")
+        _endTest(False)
+
 
 def checkFileWriteable(fn : str) :
     if os.access(fn, os.W_OK) :
