@@ -116,8 +116,8 @@ def addRepoToCleanupList(name : str) :
 
 def checkValidateV2Project():
     wct.checkRunCommand( {    
-        'cmd'                       :   ["wvs", "--v2", "project", "status2"],
-        'expect_stdout'             :   [
+        'cmd'                       :   ["wvs", "project", "status"],
+        'expect_stderr'             :   [
                                             wct.xLastFullLine("OK"),
                                         ],
         'dontexpect_stderr'         :   [
