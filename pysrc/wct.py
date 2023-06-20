@@ -49,7 +49,7 @@ def _isListOfJsonFields(v) :
             if not "test_type" in x.keys() :
                 return False
             else :
-                if x["test_type"] not in ["unorderedArrayMatch", "valueEqual", "valueNotEqual"] :
+                if x["test_type"] not in ["unorderedArrayMatch", "arraySize", "valueEqual", "valueNotEqual"] :
                     return False
             if not "test_value" in x.keys() :
                 return False
@@ -283,6 +283,16 @@ def checkRunCommand(testvals, useShell = False) :
                     if (set(ftestValue) != set(resultFieldValue)) :
                         firstFailFunc()
                         print(f"{_doIndentString()}        {Fore.RED}BAD:  check_json_stdout [sets do not match for field '{ftestField}'")
+                        allOk = False
+                elif ftestType == "arraySize" :
+                    if (resultFieldValue is None) :
+                        if ftestValue != 0:
+                            firstFailFunc()
+                            print(f"{_doIndentString()}        {Fore.RED}BAD:  check_json_stdout [array size is 0 for field '{ftestField}'")
+                            allOk = False
+                    elif (ftestValue != len(resultFieldValue)) :
+                        firstFailFunc()
+                        print(f"{_doIndentString()}        {Fore.RED}BAD:  check_json_stdout [array sizes do not match for field '{ftestField}'")
                         allOk = False
                 elif ftestType == "valueEqual" :
                     if (ftestValue != resultFieldValue) :
