@@ -155,18 +155,25 @@ def _funcDeleteRw(action, name, exc) :
     os.chmod(name, stat.S_IWRITE)
     os.remove(name)
 
-def _findJsonField(inJsonString : str, inFieldSpec : str):
-    data = json.loads(inJsonString)
+def _findJsonField(jsonString : str, fieldSpec : str):
+    data = json.loads(jsonString)
 
-    fieldNames = inFieldSpec.split('.')
-    current = data
-    for f in fieldNames:
-        if f in current:
-            current = current[f]
+    fieldNames = fieldSpec.split('.')
+    currentValue = data
+    for field in fieldNames:
+        if '[' in field and ']' in field:
+            fieldName, arrayIndex = field.split('[')
+            arrayIndex = int(arrayIndex.replace(']', ''))
+            if fieldName in currentValue and isinstance(currentValue[fieldName], list) and len(currentValue[fieldName]) > arrayIndex:
+                currentValue = currentValue[fieldName][arrayIndex]
+            else:
+                return False, None
+        elif field in currentValue:
+            currentValue = currentValue[field]
         else:
             return False, None
 
-    return True, current
+    return True, currentValue
 
 def _getJsonField(jsonString : str, field : str) -> str :
     exists, value = _findJsonField(jsonString, field)
