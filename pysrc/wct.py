@@ -399,3 +399,33 @@ def variantBegin(msg : str) :
 def variantEnd() :
     global _g_indentLevel
     _g_indentLevel -= 1
+
+def sectionBegin(msg : str) :
+    global _g_indentLevel
+    print(f"{Fore.BLUE}{indentAndWrap(msg, _doIndentString() + '    ', 72)}{Style.RESET_ALL}")
+    _g_indentLevel += 1
+
+def sectionEnd() :
+    global _g_indentLevel
+    _g_indentLevel -= 1
+
+
+def indentAndWrap(inputString, indentPrefix, maxLineLength=72):
+    import textwrap
+
+    # Replace both Unix-style and Windows-style line breaks with spaces
+    inputString = inputString.replace('\n', ' ').replace('\r', '')
+
+    # Remove leading space if it was originally a line break
+    inputString = inputString.lstrip()
+
+    # Wrap the inputString
+    wrappedLines = textwrap.wrap(inputString, width=maxLineLength - len(indentPrefix))
+
+    # Add the indentPrefix to each line
+    outputLines = [indentPrefix + line for line in wrappedLines]
+
+    # Join the lines into a single string
+    outputString = '\n'.join(outputLines)
+
+    return outputString
