@@ -351,6 +351,16 @@ def checkRunCommand(testvals, useShell = False) :
         for x in oklist :
             print(f"{_doIndentString()}        {Fore.GREEN}OK:   {x}{Style.RESET_ALL}")
 
+        if result.returncode != 0 :
+            _msgLines = result.stderr.decode('utf-8').splitlines()
+            print(f"{_doIndentString()}        {Fore.RED}STDERR:{Style.RESET_ALL}")
+            for l in _msgLines:
+                print(f"{_doIndentString()}            {l}")
+            _msgLines = result.stdout.decode('utf-8').splitlines()
+            print(f"{_doIndentString()}        {Fore.RED}STDOUT:{Style.RESET_ALL}")
+            for l in _msgLines:
+                print(f"{_doIndentString()}            {l}")
+
         _endTest(False)
 
     print(f"{_doIndentString()}    {Fore.GREEN}PASS: {testvals['cmd']}{Style.RESET_ALL}")
