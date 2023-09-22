@@ -126,6 +126,22 @@ def checkValidateV2Project():
                                         ],
     })
 
+def checkPrepareForeignRepo(cloneName:str, cloneBase:str):
+    wct.checkRunCommand( {    
+        'cmd'                       :   ["wvs", "git", "clone", "git@wvs.io:" + cloneName + ".git"],
+        'expect_returncode'         :   0,
+    })
+
+    os.chdir(cloneBase)
+    wct.deleteFolder(".git")
+    wct.checkRunCommand( {    
+        'cmd'                       :   ["wvs", "project", "setupForeign"],
+        'expect_returncode'         :   0,
+    })
+    os.chdir("..")
+
+
+
 def _doForkRepo(sourceRepo : str) -> Tuple[Any, str]:
     _doCheckInit()
 
