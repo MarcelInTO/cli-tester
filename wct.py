@@ -105,7 +105,7 @@ printStatus(f"    Individual test workspace: {g_runTestRoot}")
 # Create a python vritual environment to run in. Don't want to
 # mess with the user's global python environment if we install things.
 printStatus("Creating python virtual environment")
-cmd = f"{sys.executable} pysrc/prepVenv.py {g_venvPath}"
+cmd = f"{sys.executable} {os.path.dirname(os.path.abspath(__file__))}/pysrc/prepVenv.py {g_venvPath}"
 subprocess.run(cmd.split())
 
 # Get the correct python executable path for the platform
@@ -126,7 +126,7 @@ subprocess.run(cmd.split())
 
 # In the virtual environment, makes sure requirements are up to date
 printStatus("Checking for venv python prerequisites")
-cmd = f"{pPath} -m pip -q install -r pysrc/requirements.txt"
+cmd = f"{pPath} -m pip -q install -r {os.path.dirname(os.path.abspath(__file__))}/pysrc/requirements.txt"
 subprocess.run(cmd.split())
 
 # in the virtual environment run test tester
@@ -162,7 +162,8 @@ for pat in g_testnames :
         if g_path is not None :
             envToUse["PATH"] = g_path + os.pathsep + envToUse["PATH"]
 
-        cmd = f"{pPath} {os.path.abspath('pysrc/runTest.py')} {v} {g_runTestRoot} {os.path.abspath(v)}  {vstring}"
+        tmpPath = f"{os.path.dirname(os.path.abspath(__file__))}/pysrc/runTest.py"
+        cmd = f"{pPath} {os.path.abspath(tmpPath)} {v} {g_runTestRoot} {os.path.abspath(v)}  {vstring}"
         subprocess.run(cmd.split(), cwd=g_runTestRoot, env=envToUse)
 
         # The tests change working directories, so before we can clean anything for

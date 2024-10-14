@@ -252,6 +252,12 @@ def checkRunCommand(testvals, useShell = False) :
         print(f"        invalid test command descriptor")
         _endTest(False)
 
+    # The executable might not be found and subprocess.run does not deal with that
+    # gracefully. So check first.
+    if not shutil.which(testvals["cmd"][0]) :
+        firstFailFunc()
+        print(f"{_doIndentString()}        {Fore.RED}BAD:  command not found '{testvals['cmd'][0]}'{Style.RESET_ALL}")
+        _endTest(False)
     result = subprocess.run(testvals["cmd"], capture_output=True, shell=useShell)
 
     oklist = []
