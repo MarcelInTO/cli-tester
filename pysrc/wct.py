@@ -192,46 +192,27 @@ def _getJsonFieldExists(jsonString : str, field : str) -> bool :
 # Public functions for generating regex
 ##############################################################################
 
-def xAnywhere(v) :
+def xEscape(v) :
     return re.escape(v)
 
+def xAnywhere(v) :
+    return v
+
 def xAnywhereSameLine(v1, v2) :
-    return re.escape(v1) + r".*" + re.escape(v2)
+    return v1 + r".*" + v2
 
 def xAnywhereConsecutiveLines(v1, v2) :
-    return re.escape(v1) + r".*\r?\n.*" + re.escape(v2)
-
-def xAnywherePair(v1, v2) :
-    return re.escape(v1) + r".*" + re.escape(v2)
-
-def xAnywherePair2ConsecutiveLines(v1, v2, v3, v4) :
-    return re.escape(v1) + r".*" + re.escape(v2) + r".*\r?\n.*" + re.escape(v3) + r".*" + re.escape(v4)
-
-def xAnywherePair3ConsecutiveLines(v1, v2, v3, v4, v5, v6) :
-    return re.escape(v1) + r".*" + re.escape(v2) + r".*\r?\n.*" + re.escape(v3) + r".*" + re.escape(v4) + r".*\r?\n.*" + re.escape(v5) + r".*" + re.escape(v6)
-
-def xAnywherePair4ConsecutiveLines(v1, v2, v3, v4, v5, v6, v7, v8) :
-    return re.escape(v1) + r".*" + re.escape(v2) + r".*\r?\n.*" + re.escape(v3) + r".*" + re.escape(v4) + r".*\r?\n.*" + re.escape(v5) + r".*" + re.escape(v6) + r".*\r?\n.*" + re.escape(v7) + r".*" + re.escape(v8)
-
-def xAnywherePair5ConsecutiveLines(v1, v2, v3, v4, v5, v6, v7, v8, v9, v10) :
-    return re.escape(v1) + r".*" + re.escape(v2) + r".*\r?\n.*" + re.escape(v3) + r".*" + re.escape(v4) + r".*\r?\n.*" + re.escape(v5) + r".*" + re.escape(v6) + r".*\r?\n.*" + re.escape(v7) + r".*" + re.escape(v8) + r".*\r?\n.*" + re.escape(v9) + r".*" + re.escape(v10)
-
-def xAnywherePair6ConsecutiveLines(v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12) :
-    return re.escape(v1) + r".*" + re.escape(v2) + r".*\r?\n.*" + re.escape(v3) + r".*" + re.escape(v4) + r".*\r?\n.*" + re.escape(v5) + r".*" + re.escape(v6) + r".*\r?\n.*" + re.escape(v7) + r".*" + re.escape(v8) + r".*\r?\n.*" + re.escape(v9) + r".*" + re.escape(v10) + r".*\r?\n.*" + re.escape(v11) + r".*" + re.escape(v12)
-
-def xAnywherePair7ConsecutiveLines(v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14) :
-    return re.escape(v1) + r".*" + re.escape(v2) + r".*\r?\n.*" + re.escape(v3) + r".*" + re.escape(v4) + r".*\r?\n.*" + re.escape(v5) + r".*" + re.escape(v6) + r".*\r?\n.*" + re.escape(v7) + r".*" + re.escape(v8) + r".*\r?\n.*" + re.escape(v9) + r".*" + re.escape(v10) + r".*\r?\n.*" + re.escape(v11) + r".*" + re.escape(v12) + r".*\r?\n.*" + re.escape(v13) + r".*" + re.escape(v14)
+    return v1 + r".*\r?\n.*" + v2
 
 def xFullLine(v) :
-    return r"^" + re.escape(v) + r"\r?\n"
-
+    return r"^" + v + r"\r?\n"
 
 def xLastFullLine(v) :
     return xFullLine(v) + r"\Z"
 
 
 def xBeginningOfLine(v) :
-    return r"^" + re.escape(v)
+    return r"^" + v
 
 
 ##############################################################################
