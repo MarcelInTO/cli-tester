@@ -1,9 +1,18 @@
 # Exercises checkRunShellCommand with a real shell feature (pipe).
 # Verifies the bug fix that joins the cmd list when shell=True.
-from wct import checkRunShellCommand, xAnywhere, xEscape
+#
+# `grep` is not on a default Windows install, so we use cmd.exe's builtin
+# `findstr` there. The point is to exercise a shell pipe end-to-end; the
+# specific filter tool doesn't matter.
+from wct import checkRunShellCommand, operatingSystem, xAnywhere, xEscape
+
+if operatingSystem() == "Windows" :
+    cmd = ["echo", "alpha beta gamma", "|", "findstr", "beta"]
+else :
+    cmd = ["echo", "alpha beta gamma", "|", "grep", "beta"]
 
 checkRunShellCommand({
-    "cmd": ["echo", "alpha beta gamma", "|", "grep", "beta"],
+    "cmd": cmd,
     "expect_returncode": 0,
     "expect_stdout": xAnywhere(xEscape("beta")),
 })
