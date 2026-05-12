@@ -23,8 +23,22 @@ def _onDeleteRw(action, name, exc) :
 _perRunBase = Path(user_cache_dir("wct")) / f"run-{os.getpid()}"
 
 
+def _stepOutOfWorkspace() :
+    # Windows refuses to delete a directory that is anyone's current working
+    # directory (WinError 32). The runner chdir's into the workspace before
+    # running each test, so by the time we come around to reset it we are
+    # standing in the directory we are about to delete. Step out to the user's
+    # home (always exists, never the workspace) before any rmtree call.
+    # Harmless on Unix, where deleting your own cwd just produces a stale inode.
+    try :
+        os.chdir(Path.home())
+    except OSError :
+        pass
+
+
 def _cleanupPerRunBase() :
     if _perRunBase.exists() :
+        _stepOutOfWorkspace()
         shutil.rmtree(_perRunBase, onerror=_onDeleteRw)
 
 
@@ -40,6 +54,7 @@ def getRunRoot() -> Path :
 def resetRunRoot() -> Path :
     """Wipe and recreate the workspace. Returns the workspace path."""
     root = getRunRoot()
+    _stepOutOfWorkspace()
     if root.exists() :
         if root.is_dir() :
             shutil.rmtree(root, onerror=_onDeleteRw)
