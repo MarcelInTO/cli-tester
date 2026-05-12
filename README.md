@@ -88,7 +88,8 @@ wct 'tests/test_*.py'
 ## Running tests
 
 ```
-wct <test_path_or_glob> [<test_path_or_glob> ...] [-p PATH] [-v] [--junit FILE]
+wct <test_path_or_glob> [<test_path_or_glob> ...]
+    [-p PATH] [-v] [--junit FILE] [--setup PATH] [--teardown PATH]
 ```
 
 - Multiple paths or globs can be listed on one command line.
@@ -96,6 +97,7 @@ wct <test_path_or_glob> [<test_path_or_glob> ...] [-p PATH] [-v] [--junit FILE]
 - `-p PATH` prepends to `$PATH` when running the executables under test — handy when testing a locally-built binary that isn't installed yet.
 - `-v` prints additional configuration and progress output.
 - `--junit FILE` writes a JUnit XML report on completion; see [Continuous integration](#continuous-integration).
+- `--setup PATH` / `--teardown PATH` run a script once before / after the suite; see [Suite-level setup and teardown](#suite-level-setup-and-teardown).
 
 Each test runs in a clean workspace under `~/.cache/wct/`. The workspace is wiped between tests, so tests cannot rely on prior state.
 
@@ -181,6 +183,65 @@ checkRunShellCommand({
 
 The `cmd` list is joined with spaces and passed to the shell — there is no automatic quoting, so if you need a literal argument with spaces or special characters, quote it yourself within the list element.
 
+## Suite-level setup and teardown
+
+For tests that share an expensive precondition — booting a server, provisioning a transient database schema — wct can run a setup script once before the suite and a teardown script once after.
+
+```sh
+wct --setup setup.py --teardown teardown.py 'tests/test_*.py'
+```
+
+Both flags are independent — you can pass `--setup` alone if you don't need a teardown, and vice versa. Setup and teardown run in the directory you invoked `wct` from (not a clean workspace, unlike tests), so they can manage paths under `/tmp`, `~/.config`, etc. without surprise.
+
+### Sharing data with tests and teardown
+
+```python
+# setup.py
+from wct import exportEnv, setState
+
+exportEnv("MYAPP_SERVER_PORT", "24690")        # env var visible to every test
+setState("schema", "myapp_test_12345")         # state visible only to teardown
+```
+
+```python
+# teardown.py
+from wct import getState
+
+schema = getState("schema")
+# ... drop the schema ...
+```
+
+- `exportEnv(name, value)` sets an env var that every test (and teardown) can read. It dies with the wct process, so it doesn't leak into your shell.
+- `setState(key, value)` records a JSON-serializable value in a state file. `getState(key, default=None)` reads it back. State is **not** placed in the environment, so it stays invisible to tests that don't ask for it.
+
+### Lifecycle and failure handling
+
+- If setup fails, tests do not run. Teardown still runs, against whatever state setup recorded before failing.
+- If teardown fails, the exit code becomes `1` and the teardown failure is reported on its own line so it doesn't get conflated with the test counts.
+- `Ctrl-C` during the test phase stops new tests from starting, runs teardown, and exits non-zero. A second `Ctrl-C` skips teardown.
+
+**Teardown must tolerate missing state** because of partial-setup failures — if setup boots one server, records its PID, and then fails on a second server, teardown still needs to clean up the first one. `getState` returns `None` (or the supplied default) when a key was never set, and the natural idiom uses null-checks:
+
+```python
+# setup.py
+from wct import setState
+
+pid1 = startServer(...); setState("server1_pid", pid1)
+pid2 = startServer(...); setState("server2_pid", pid2)   # might fail here
+```
+
+```python
+# teardown.py
+from wct import getState
+
+if (pid := getState("server1_pid")):
+    stopServer(pid)
+if (pid := getState("server2_pid")):
+    stopServer(pid)
+```
+
+If setup fails after booting server 1 but before recording `server2_pid`, teardown still cleans up server 1.
+
 ## Understanding the output
 
 Each test prints a `Running test 'X'` header, then one line per check, then a final summary. The status markers:
@@ -191,7 +252,7 @@ Each test prints a `Running test 'X'` header, then one line per check, then a fi
 - **`BAD`** — a sub-check inside a `checkRunCommand` failed. Same context as `OK`.
 - **`ERROR`** — the test script itself raised an unhandled exception (not a failed check). Reported separately from failures in the summary.
 
-The final line is `N/M passed[, X failed][, Y errored]`. The process exits `0` if everything passed, `1` if anything failed or errored, `2` if no tests matched.
+The final line is `N/M passed[, X failed][, Y errored]`. When `--setup` or `--teardown` are used, a `Setup: PASS/FAIL` and/or `Teardown: PASS/FAIL` line appears just above it so suite-level outcomes don't get conflated with test counts. The process exits `0` if everything passed, `1` if anything failed or errored, `2` if no tests matched.
 
 ## Continuous integration
 
@@ -219,6 +280,8 @@ test:
 ```
 
 GitLab surfaces per-test results in the merge-request widget via `artifacts:reports:junit`, and tracks flakiness over time. `when: always` ensures the report is uploaded even when the job fails — which is when you most want it.
+
+When `--setup` or `--teardown` are used, the JUnit report includes synthetic testcases `__suite_setup__` and `__suite_teardown__` (under classname `wct.suite`) so failures there surface in CI alongside the real tests.
 
 ## API reference
 
@@ -271,6 +334,14 @@ Use field paths like `data.items[0].name`. Supported `test_type` values:
 
 - **`sectionBegin(msg)`** / **`sectionEnd()`** — wrap a group of checks with a labeled banner.
 - **`variantBegin(msg)`** / **`variantEnd()`** — wrap a sub-block within a section, typically used to run the same logic with different inputs.
+
+### Suite-level setup and teardown
+
+Intended for use from a `--setup` or `--teardown` script. See [Suite-level setup and teardown](#suite-level-setup-and-teardown) for the lifecycle.
+
+- **`exportEnv(name, value)`** — set an env var that every test (and teardown) in this run can read.
+- **`setState(key, value)`** — record a JSON-serializable value for teardown to read back later.
+- **`getState(key, default=None)`** — read a value set by `setState`. Returns `default` when the key was never set.
 
 ### Regex helpers
 
