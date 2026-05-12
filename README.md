@@ -22,13 +22,13 @@ Useful for consumers (CI jobs, other tools) that don't want a local checkout. Th
 For HTTPS (works anywhere, including CI jobs without any token setup):
 
 ```sh
-uv tool install "git+https://studio.wevr.com/wevr-public/cli-tester.git@v1.1.0"
+uv tool install "git+https://studio.wevr.com/wevr-public/cli-tester.git@v1.2.0"
 ```
 
 For workstations that already have SSH set up to studio.wevr.com:
 
 ```sh
-uv tool install "git+ssh://git@studio.wevr.com/wevr-public/cli-tester.git@v1.1.0"
+uv tool install "git+ssh://git@studio.wevr.com/wevr-public/cli-tester.git@v1.2.0"
 ```
 
 A full CI snippet for another project on this GitLab instance:
@@ -37,7 +37,7 @@ A full CI snippet for another project on this GitLab instance:
 test:
   image: ghcr.io/astral-sh/uv:python3.10-bookworm-slim
   script:
-    - uv tool install "git+https://studio.wevr.com/wevr-public/cli-tester.git@v1.1.0"
+    - uv tool install "git+https://studio.wevr.com/wevr-public/cli-tester.git@v1.2.0"
     - export PATH="$HOME/.local/bin:$PATH"
     - wct --junit junit.xml 'tests/test_*.py'
   artifacts:
