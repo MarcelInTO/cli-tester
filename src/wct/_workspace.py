@@ -54,6 +54,16 @@ def getRunRoot() -> Path :
     return _perRunBase / "runroot"
 
 
+def getStateFilePath() -> Path :
+    """Path to the JSON file used by setState/getState to ferry data from the
+    suite-level setup script to teardown. Lives inside the per-PID base so it
+    is naturally isolated from nested wct invocations and removed by the
+    atexit cleanup on normal exit. The parent directory is created on demand
+    by the first writer; readers may see a non-existent file before setup has
+    written anything, which getState treats as 'no state yet'."""
+    return _perRunBase / "state.json"
+
+
 def resetRunRoot() -> Path :
     """Wipe and recreate the workspace. Returns the workspace path."""
     root = getRunRoot()
