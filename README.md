@@ -6,20 +6,50 @@ A black-box test runner for command-line programs. Tests are plain Python script
 
 WCT requires Python 3.10 or later. The recommended installer is [uv](https://docs.astral.sh/uv/), which manages its own Python — you don't need to install one separately.
 
-**WCT is not yet published to PyPI.** For now, install from a local clone:
+**WCT is not yet published to PyPI.** Until then, install from a clone or directly from the git URL.
+
+### From a local clone
 
 ```sh
 git clone <repository-url>
 uv tool install --editable cli-tester
 ```
 
-Once published, this will become:
+### Directly from the git URL
+
+Useful for consumers (CI jobs, other tools) that don't want a local checkout. For workstations with SSH access to studio.wevr.com:
+
+```sh
+uv tool install "git+ssh://git@studio.wevr.com/marcel/cli-tester.git@v0.2.0"
+```
+
+For another project's GitLab CI job, using the auto-injected `CI_JOB_TOKEN`:
+
+```yaml
+test:
+  image: ghcr.io/astral-sh/uv:python3.10-bookworm-slim
+  script:
+    - uv tool install "git+https://gitlab-ci-token:${CI_JOB_TOKEN}@studio.wevr.com/marcel/cli-tester.git@v0.2.0"
+    - export PATH="$HOME/.local/bin:$PATH"
+    - wct --junit junit.xml 'tests/test_*.py'
+  artifacts:
+    when: always
+    paths: [junit.xml]
+    reports:
+      junit: junit.xml
+```
+
+A one-time setup on the wct project is required for `CI_JOB_TOKEN` to grant the consumer access: **Settings → CI/CD → Token Access → Allowed projects/groups**, and add each consumer project (or its parent group). GitLab's default since 16.0 is to deny cross-project token access; you have to opt in.
+
+Pin to a tag (above) for stability against main-branch churn.
+
+### Once published to PyPI
 
 ```sh
 uv tool install wct
 ```
 
-`pipx install --editable cli-tester` and `pip install --editable cli-tester` also work — `pyproject.toml` is standard.
+`pipx install ...` and `pip install ...` will also work — `pyproject.toml` is standard.
 
 ## Quick start
 
