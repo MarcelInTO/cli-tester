@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Wevr, Inc.
+# Licensed under the MIT License. See LICENSE in the project root.
+
 # Exercises check_json_stdout against a command whose stdout is plain text,
 # not JSON. The runner should report a clean FAIL rather than crashing with
 # JSONDecodeError.

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Wevr, Inc.
+# Licensed under the MIT License. See LICENSE in the project root.
+
 # Exercises checkRunShellCommand with a real shell feature (pipe).
 # Verifies the bug fix that joins the cmd list when shell=True.
 #

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Wevr, Inc.
+# Licensed under the MIT License. See LICENSE in the project root.
+
 from wct import checkRunCommand, xAnywhere, xEscape
 
 # Passing a glob that matches no files should exit with code 2 and report

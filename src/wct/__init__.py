@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Wevr, Inc.
+# Licensed under the MIT License. See LICENSE in the project root.
+
 # Please follow the established pattern and keep the imports
 # alphabetized (logically, not pedantically)
 
