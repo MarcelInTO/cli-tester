@@ -138,6 +138,23 @@ checkRunCommand({
 })
 ```
 
+### Sharing helpers between tests
+
+A test (or `--setup` / `--teardown` script) can `import` a Python module that lives alongside it — wct prepends the script's directory to `sys.path` for the duration of the run, the same way `python script.py` does. So a sibling `helpers.py` just works:
+
+```python
+# tests/helpers.py
+MY_BIN = "/opt/myapp/bin/mytool"
+
+# tests/test_smoke.py
+from wct import checkRunCommand
+from helpers import MY_BIN
+
+checkRunCommand({"cmd": [MY_BIN, "--version"], "expect_returncode": 0})
+```
+
+Two tests in different directories can each define their own `helpers.py` with different contents; each test resolves to its own neighbor.
+
 ### Organizing tests
 
 A common convention is to keep tests under `tests/`, named `test_*.py`, with any shared inputs under `tests/fixtures/`. Run them all with one glob:
