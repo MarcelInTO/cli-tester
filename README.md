@@ -20,7 +20,7 @@ uv tool install --editable cli-tester
 Useful for consumers (CI jobs, other tools) that don't want a local checkout. For workstations with SSH access to studio.wevr.com:
 
 ```sh
-uv tool install "git+ssh://git@studio.wevr.com/marcel/cli-tester.git@v0.2.0"
+uv tool install "git+ssh://git@studio.wevr.com/wevr-public/cli-tester.git@v0.2.0"
 ```
 
 For another project's GitLab CI job, using the auto-injected `CI_JOB_TOKEN`:
@@ -29,7 +29,7 @@ For another project's GitLab CI job, using the auto-injected `CI_JOB_TOKEN`:
 test:
   image: ghcr.io/astral-sh/uv:python3.10-bookworm-slim
   script:
-    - uv tool install "git+https://gitlab-ci-token:${CI_JOB_TOKEN}@studio.wevr.com/marcel/cli-tester.git@v0.2.0"
+    - uv tool install "git+https://gitlab-ci-token:${CI_JOB_TOKEN}@studio.wevr.com/wevr-public/cli-tester.git@v0.2.0"
     - export PATH="$HOME/.local/bin:$PATH"
     - wct --junit junit.xml 'tests/test_*.py'
   artifacts:
