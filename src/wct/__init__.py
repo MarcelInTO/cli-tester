@@ -15,6 +15,8 @@ import textwrap
 
 from colorama import Fore, Style, init as _colorama_init
 
+from ._workspace import getStateFilePath
+
 # Initialize colorama at import so any consumer importing the API gets working
 # color output without needing to call init() themselves. Safe to call repeatedly.
 _colorama_init()
@@ -480,3 +482,40 @@ def indentAndWrap(inputString: str, indentPrefix: str, maxLineLength: int = 72) 
     wrappedLines = textwrap.wrap(inputString, width=maxLineLength - len(indentPrefix))
     outputLines = [indentPrefix + line for line in wrappedLines]
     return '\n'.join(outputLines)
+
+
+##############################################################################
+# Public functions for suite-level setup/teardown scripts
+##############################################################################
+
+def exportEnv(name: str, value: str) :
+    """Make an env var visible to every test (and to teardown) for this wct run.
+    Dies with the wct process; does not leak back into the user's shell."""
+    os.environ[name] = value
+
+
+def setState(key: str, value) :
+    """Record a JSON-serializable value for teardown to read via getState.
+    Flushed to disk per call so a partial-setup failure leaves usable state."""
+    path = getStateFilePath()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try :
+        data = json.loads(path.read_text())
+    except (FileNotFoundError, json.JSONDecodeError) :
+        data = {}
+    data[key] = value
+    # Write-then-rename so a crash mid-write cannot corrupt the file teardown reads.
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data))
+    os.replace(tmp, path)
+
+
+def getState(key: str, default=None) :
+    """Read a value recorded by setState. Returns default when the key was never
+    set or when setup never ran far enough to create the state file."""
+    path = getStateFilePath()
+    try :
+        data = json.loads(path.read_text())
+    except (FileNotFoundError, json.JSONDecodeError) :
+        return default
+    return data.get(key, default)
