@@ -1,22 +1,56 @@
-# Runs the wct meta-test suite on every push.
+# Runs the wct meta-test suite on every push, across Linux, macOS, and Windows.
 # https://docs.gitlab.com/ee/ci/yaml/
-
-image: ghcr.io/astral-sh/uv:python3.10-bookworm-slim
 
 stages:
   - test
 
-test:
+test:linux:
   stage: test
+  image: ghcr.io/astral-sh/uv:python3.10-bookworm-slim
   script:
     # `uv sync` creates a .venv and installs the project's dependencies as well
     # as wct itself (from pyproject.toml). `uv run` then executes wct from
     # inside that venv.
     - uv sync
-    - uv run wct --junit junit.xml 'tests/test_*.py'
+    - uv run wct --junit junit-linux.xml 'tests/test_*.py'
   artifacts:
     when: always
     paths:
-      - junit.xml
+      - junit-linux.xml
     reports:
-      junit: junit.xml
+      junit: junit-linux.xml
+
+test:macos:
+  stage: test
+  tags:
+    - macos
+  script:
+    # uv install is idempotent; bail out if it's already on PATH (e.g. cached
+    # on the runner from a prior job).
+    - command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
+    - export PATH="$HOME/.local/bin:$PATH"
+    - uv sync
+    - uv run wct --junit junit-macos.xml 'tests/test_*.py'
+  artifacts:
+    when: always
+    paths:
+      - junit-macos.xml
+    reports:
+      junit: junit-macos.xml
+
+test:windows:
+  stage: test
+  tags:
+    - wevrCodeBuildWin
+  script:
+    # uv install via the official PowerShell installer if not already present.
+    - if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { powershell -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex" }
+    - $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
+    - uv sync
+    - uv run wct --junit junit-windows.xml 'tests/test_*.py'
+  artifacts:
+    when: always
+    paths:
+      - junit-windows.xml
+    reports:
+      junit: junit-windows.xml
