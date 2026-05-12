@@ -259,6 +259,53 @@ if (pid := getState("server2_pid")):
 
 If setup fails after booting server 1 but before recording `server2_pid`, teardown still cleans up server 1.
 
+## Marking known-broken cases (xfail)
+
+When a test exposes a real bug the team can't fix yet, you have three bad choices: let the test stay red (and people stop reading CI), delete or skip the test (and lose the regression signal), or rewrite the assertion to lock in the buggy behavior (and break the test for the wrong reason when somebody fixes it). The standard fix is the `xfail` pattern — say "this is expected to fail today" so the suite stays green, but the moment it starts passing, *that* is the failure signal that tells you to come delete the marker.
+
+WCT offers two flavors. Use whichever fits.
+
+### Per-block: `expectFail(reason)`
+
+Wrap the known-broken section in a context manager. A `FAIL` inside the block is reported as `XFAIL` (test continues, suite exit code unaffected); if every check inside the block passes, the block is reported as `XPASS` and the suite fails — the marker is now stale.
+
+```python
+from wct import checkRunCommand, expectFail
+
+# happy-path checks run normally
+checkRunCommand({"cmd": ["./mytool", "version"], "expect_returncode": 0})
+
+with expectFail("validation gap, tracked in issues#585") :
+    checkRunCommand({
+        "cmd": ["./mytool", "validate", "bad-input"],
+        "expect_returncode": 1,
+    })
+
+# more happy-path checks
+checkRunCommand({"cmd": ["./mytool", "help"], "expect_returncode": 0})
+```
+
+### Whole-test: `expectTestFails(reason)`
+
+Call this near the top of a test to mark the entire test as expected-to-fail. If anything in the test produces a `FAIL`, the test is reported `XFAIL`; if the whole test passes, it's reported `XPASS` and the suite fails.
+
+```python
+from wct import checkRunCommand, expectTestFails
+
+expectTestFails("known bug, tracked in issues#585")
+
+checkRunCommand({...})
+checkRunCommand({...})
+```
+
+### Semantics that matter
+
+- **`XFAIL` does not change the exit code.** The whole point of the marker is to keep CI green while a known bug waits its turn.
+- **`XPASS` does change the exit code** — the marker is stale and needs to be removed. Without this, xfail is just a glorified skip.
+- **Only `TestFailed` (a `FAIL` line) counts as the expected failure.** An unhandled exception from your test code still surfaces as `ERROR`; a broken test is not a known bug.
+- **A `FAIL` outside any xfail block still fails the suite.** Real failures aren't suppressed by the presence of xfail blocks elsewhere in the test.
+- **JUnit XML reports `xfail` as `<skipped>` and `xpass` as `<failure>`** so CI systems surface stale markers without treating expected failures as regressions.
+
 ## Understanding the output
 
 Each test prints a `Running test 'X'` header, then one line per check, then a final summary. The status markers:
@@ -268,8 +315,10 @@ Each test prints a `Running test 'X'` header, then one line per check, then a fi
 - **`OK`** — a sub-check inside a `checkRunCommand` succeeded. Only printed when *some* sub-check in the same call failed, so you can see which parts went right.
 - **`BAD`** — a sub-check inside a `checkRunCommand` failed. Same context as `OK`.
 - **`ERROR`** — the test script itself raised an unhandled exception (not a failed check). Reported separately from failures in the summary.
+- **`XFAIL`** — a known-broken check failed as expected inside an `expectFail` block (or in a test marked with `expectTestFails`). Counts as a pass for exit-code purposes.
+- **`XPASS`** — a check inside an `expectFail` block (or an `expectTestFails`-marked test) didn't fail. The bug appears fixed; remove the marker. Counts as a failure for exit-code purposes.
 
-The final line is `N/M passed[, X failed][, Y errored]`. When `--setup` or `--teardown` are used, a `Setup: PASS/FAIL` and/or `Teardown: PASS/FAIL` line appears just above it so suite-level outcomes don't get conflated with test counts. The process exits `0` if everything passed, `1` if anything failed or errored, `2` if no tests matched.
+The final line is `N/M passed[, X failed][, Y errored][, Z xfailed][, W xpassed]`. `xfailed` tests are counted alongside `passed` in the leading fraction because they went the way the test asserted they should. Each `xpassed` test is also printed on its own line below the summary so you can see which markers to remove. When `--setup` or `--teardown` are used, a `Setup: PASS/FAIL` and/or `Teardown: PASS/FAIL` line appears just above it so suite-level outcomes don't get conflated with test counts. The process exits `0` if everything passed (including xfailed), `1` if anything failed, errored, or xpassed, `2` if no tests matched.
 
 ## Continuous integration
 
@@ -346,6 +395,13 @@ Use field paths like `data.items[0].name`. Supported `test_type` values:
 - **`passTest(message)`** — log an informational pass. Does not terminate the test; use for recording checkpoints that don't fit the `check*` functions.
 - **`operatingSystem()`** — returns `"Linux"`, `"Darwin"`, or `"Windows"`. Use to branch test logic across platforms.
 - **`deleteFolder(path)`** — remove a directory tree, including read-only files.
+
+### Known-broken cases
+
+See [Marking known-broken cases (xfail)](#marking-known-broken-cases-xfail) for the rationale and semantics.
+
+- **`expectFail(reason)`** — context manager. A `FAIL` inside the block is reported as `XFAIL` (and swallowed); if every check inside passes, the block is reported as `XPASS` (and the suite fails). Only `TestFailed` is swallowed; other exceptions still propagate as `ERROR`.
+- **`expectTestFails(reason)`** — mark the entire current test as expected-to-fail. Same semantics as `expectFail`, applied to the whole test.
 
 ### Output grouping
 

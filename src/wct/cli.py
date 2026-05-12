@@ -17,7 +17,7 @@ from colorama import Fore, Style
 from pathlib import Path
 from xml.etree.ElementTree import Element, ElementTree, SubElement
 
-from . import TestFailed, _resetIndentLevel
+from . import TestFailed, _getXfailState, _resetIndentLevel, _resetXfailState
 from ._workspace import getRunRoot, getStateFilePath, resetRunRoot
 
 
@@ -64,8 +64,13 @@ def _testClassname(displayPath) :
 
 
 def _writeJunit(path, results) :
-    failures = sum(1 for r in results if r["status"] == "failed")
+    # xpassed is a real suite failure (a known bug appears fixed and the
+    # marker should be removed), so it goes into <failure>. xfailed is the
+    # expected outcome and is reported as <skipped> so CI surfaces it as
+    # informational rather than as a regression.
+    failures = sum(1 for r in results if r["status"] in ("failed", "xpassed"))
     errors = sum(1 for r in results if r["status"] == "errored")
+    skipped = sum(1 for r in results if r["status"] == "xfailed")
     totalTime = sum(r["duration"] for r in results)
 
     suites = Element("testsuites")
@@ -74,6 +79,7 @@ def _writeJunit(path, results) :
         "tests": str(len(results)),
         "failures": str(failures),
         "errors": str(errors),
+        "skipped": str(skipped),
         "time": f"{totalTime:.3f}",
     })
     for r in results :
@@ -88,12 +94,22 @@ def _writeJunit(path, results) :
                 "type": "TestFailed",
             })
             fail.text = r["message"]
+        elif r["status"] == "xpassed" :
+            fail = SubElement(case, "failure", attrib={
+                "message": r["message"] or "unexpected pass (xpass)",
+                "type": "UnexpectedPass",
+            })
+            fail.text = r["message"]
         elif r["status"] == "errored" :
             err = SubElement(case, "error", attrib={
                 "message": (r["message"].splitlines()[0] if r["message"] else "unexpected exception"),
                 "type": "Exception",
             })
             err.text = r["message"]
+        elif r["status"] == "xfailed" :
+            SubElement(case, "skipped", attrib={
+                "message": r["message"] or "expected failure (xfail)",
+            })
 
     parent = os.path.dirname(path)
     if parent :
@@ -184,6 +200,41 @@ def _runScript(displayPath, absPath, header, name, classname) -> dict :
     }
 
 
+def _applyXfail(status, message, xfailState) :
+    """Combine the raw post-test status with the xfail bookkeeping captured
+    during the run. Precedence:
+      - errored stays errored (broken test machinery beats any xfail signal)
+      - whole-test xfail dominates per-block when set (the per-block reasons
+        still print to the console but don't affect the suite-level status)
+      - within per-block: any xpass turns the test xpassed (the marker should
+        be removed); otherwise any xfail turns it xfailed
+    """
+    if status == "errored" :
+        return status, message
+
+    wholeTestReason = xfailState["wholeTestReason"]
+    blocks = xfailState["blocks"]
+
+    if wholeTestReason is not None :
+        if status == "failed" :
+            return "xfailed", wholeTestReason
+        # status was "passed" (or any non-fail outcome we accept): the bug
+        # appears fixed, so the marker is stale — flag as xpass.
+        return "xpassed", (f"{wholeTestReason} - bug appears fixed, "
+                           f"remove the expectTestFails() call")
+
+    if status == "failed" :
+        return status, message
+
+    xpassReasons = [b["reason"] for b in blocks if b["outcome"] == "xpass"]
+    xfailReasons = [b["reason"] for b in blocks if b["outcome"] == "xfail"]
+    if xpassReasons :
+        return "xpassed", "; ".join(xpassReasons) + " - remove the expectFail wrapper"
+    if xfailReasons :
+        return "xfailed", "; ".join(xfailReasons)
+    return status, message
+
+
 def _printScriptOutcome(label, result) :
     if result["status"] == "passed" :
         print(f"{label}: {Fore.GREEN}PASS{Style.RESET_ALL}")
@@ -272,6 +323,7 @@ def main() -> int :
             # Tests can leave the indent counter unbalanced (e.g. variantBegin without
             # variantEnd). Reset so the next test's output is not corrupted.
             _resetIndentLevel()
+            _resetXfailState()
 
             print(f"    {Fore.YELLOW}Running test '{Path(displayPath).as_posix()}'{Style.RESET_ALL}")
 
@@ -297,6 +349,11 @@ def main() -> int :
 
             duration = time.monotonic() - startTime
 
+            # Fold xfail bookkeeping into the test-level outcome. errored takes
+            # priority — an unhandled exception means the test machinery itself
+            # broke, which is more important to surface than any xfail signal.
+            status, message = _applyXfail(status, message, _getXfailState())
+
             testResults.append({
                 "name": _testName(displayPath),
                 "classname": _testClassname(displayPath),
@@ -313,6 +370,8 @@ def main() -> int :
     passed = sum(1 for r in testResults if r["status"] == "passed")
     failed = sum(1 for r in testResults if r["status"] == "failed")
     errored = sum(1 for r in testResults if r["status"] == "errored")
+    xfailed = sum(1 for r in testResults if r["status"] == "xfailed")
+    xpassed = sum(1 for r in testResults if r["status"] == "xpassed")
     total = len(testResults)
 
     print()
@@ -321,12 +380,26 @@ def main() -> int :
     if teardownResult is not None :
         _printScriptOutcome("Teardown", teardownResult)
 
-    summary = f"{passed}/{total} passed"
+    # Count xfailed alongside passed in the leading fraction: from the suite's
+    # perspective xfail is a "things went the way we expected" outcome and
+    # should not depress the pass rate. xpassed is a real failure (the marker
+    # should be removed) and gets called out separately.
+    summary = f"{passed + xfailed}/{total} passed"
     if failed :
         summary += f", {Fore.RED}{failed} failed{Style.RESET_ALL}"
     if errored :
         summary += f", {Fore.RED}{errored} errored{Style.RESET_ALL}"
+    if xfailed :
+        summary += f", {Fore.YELLOW}{xfailed} xfailed{Style.RESET_ALL}"
+    if xpassed :
+        summary += f", {Fore.RED}{xpassed} xpassed{Style.RESET_ALL}"
     print(summary)
+
+    # Surface each xpass with its reason so the user sees exactly which
+    # markers to delete — the summary count alone isn't actionable.
+    for r in testResults :
+        if r["status"] == "xpassed" :
+            print(f"   {Fore.RED}XPASS: {r['name']}: {r['message']}{Style.RESET_ALL}")
 
     if junitPath :
         allResults = []
@@ -338,7 +411,7 @@ def main() -> int :
         _writeJunit(junitPath, allResults)
 
     teardownFailed = teardownResult is not None and teardownResult["status"] != "passed"
-    if setupFailed or failed or errored or teardownFailed or _g_stopFlag :
+    if setupFailed or failed or errored or xpassed or teardownFailed or _g_stopFlag :
         return 1
     return 0
 
