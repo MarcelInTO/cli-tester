@@ -1,0 +1,22 @@
+# Runs the wct meta-test suite on every push.
+# https://docs.gitlab.com/ee/ci/yaml/
+
+image: ghcr.io/astral-sh/uv:python3.10-bookworm-slim
+
+stages:
+  - test
+
+test:
+  stage: test
+  script:
+    # `uv sync` creates a .venv and installs the project's dependencies as well
+    # as wct itself (from pyproject.toml). `uv run` then executes wct from
+    # inside that venv.
+    - uv sync
+    - uv run wct --junit junit.xml 'tests/test_*.py'
+  artifacts:
+    when: always
+    paths:
+      - junit.xml
+    reports:
+      junit: junit.xml

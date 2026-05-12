@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "wct"
+version = "0.2.0"
+description = "Black-box test runner for command-line programs"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{name = "Marcel Samek", email = "marcel@wevr.com"}]
+license = {text = "MIT"}
+dependencies = [
+    "colorama>=0.4.6",
+    "platformdirs>=4.0",
+]
+
+[project.scripts]
+wct = "wct.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/wct"]

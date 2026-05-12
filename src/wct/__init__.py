@@ -1,3 +1,6 @@
+# Please follow the established pattern and keep the imports
+# alphabetized (logically, not pedantically)
+
 import json
 import os
 import platform
@@ -6,8 +9,23 @@ import shutil
 import stat
 import subprocess
 
-from colorama import Fore, Back, Style
+from colorama import Fore, Back, Style, init as _colorama_init
 from typing import Tuple
+
+# Initialize colorama at import so any consumer importing the API gets working
+# color output without needing to call init() themselves. Safe to call repeatedly.
+_colorama_init()
+
+
+##############################################################################
+# Public exception type used to signal a single failing test
+##############################################################################
+
+class TestFailed(Exception):
+    """Raised when a check fails. Caught at the per-test boundary in the runner
+    so one failing test does not terminate the whole run."""
+    pass
+
 
 ##############################################################################
 # Internal utilities for formatted output
@@ -21,6 +39,13 @@ def _doIndentString() -> str :
     for x in range(_g_indentLevel) :
         ret += "    "
     return ret
+
+
+def _resetIndentLevel() :
+    """Reset indent state between tests. Called by the runner; not part of the
+    test-facing API."""
+    global _g_indentLevel
+    _g_indentLevel = 1
 
 
 ##############################################################################
@@ -95,7 +120,7 @@ def _matchOne(patternList, theString) :
 
 
 def _endTest(status : bool):
-    quit()
+    raise TestFailed()
 
 
 def _validateCommandStruct(v) :
@@ -156,7 +181,13 @@ def _funcDeleteRw(action, name, exc) :
     os.remove(name)
 
 def _findJsonField(jsonString : str, fieldSpec : str):
-    data = json.loads(jsonString)
+    # Return (False, None) on non-JSON input rather than letting JSONDecodeError
+    # bubble up as an unhandled exception. The caller treats False/None as
+    # "field not found" and emits a clean BAD line.
+    try:
+        data = json.loads(jsonString)
+    except json.JSONDecodeError:
+        return False, None
 
     fieldNames = fieldSpec.split('.')
     currentValue = data
@@ -231,7 +262,7 @@ def deleteFolder(name : str) :
 
 def failTest(message : str):
     print(f"{_doIndentString()}    {Fore.RED}FAIL: ({message}){Style.RESET_ALL}")
-    quit()
+    raise TestFailed(message)
 
 
 def passTest(message : str) :
@@ -261,12 +292,20 @@ def checkRunCommand(testvals, useShell = False) :
         _endTest(False)
 
     # The executable might not be found and subprocess.run does not deal with that
-    # gracefully. So check first.
-    if not shutil.which(testvals["cmd"][0]) :
+    # gracefully. So check first. Skip this check when useShell=True because cmd[0]
+    # may legitimately contain shell syntax (pipelines, redirects, etc.) that
+    # shutil.which cannot resolve.
+    if not useShell and not shutil.which(testvals["cmd"][0]) :
         firstFailFunc()
         print(f"{_doIndentString()}        {Fore.RED}BAD:  command not found '{testvals['cmd'][0]}'{Style.RESET_ALL}")
         _endTest(False)
-    result = subprocess.run(testvals["cmd"], capture_output=True, shell=useShell)
+
+    # subprocess.run with shell=True expects a single command string, not a list.
+    # Passing a list with shell=True silently runs cmd[0] as the script with cmd[1:]
+    # as positional args to the shell, which is never what the caller wants. Join
+    # to a string so shell features like pipes and redirects work as expected.
+    cmdToRun = " ".join(testvals["cmd"]) if useShell else testvals["cmd"]
+    result = subprocess.run(cmdToRun, capture_output=True, shell=useShell)
 
     oklist = []
     if entryExists("expect_returncode") :
