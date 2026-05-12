@@ -51,6 +51,36 @@ def _resetIndentLevel() :
 
 
 ##############################################################################
+# Internal xfail state
+##############################################################################
+
+# Each entry is {"outcome": "xfail" | "xpass", "reason": str}, recorded by the
+# expectFail context manager as it exits. The runner reads this after the test
+# returns to compute the test-level status. expectTestFails sets the
+# whole-test reason; the runner consults it when the test ends in TestFailed
+# (xfail) or without it (xpass).
+_g_xfailBlocks = []
+_g_xfailWholeTestReason = None
+
+
+def _resetXfailState() :
+    """Reset xfail bookkeeping between tests. Called by the runner."""
+    global _g_xfailBlocks, _g_xfailWholeTestReason
+    _g_xfailBlocks = []
+    _g_xfailWholeTestReason = None
+
+
+def _getXfailState() :
+    """Return a snapshot of the current test's xfail state. The runner uses
+    this to compute the test-level outcome (passed / failed / xfailed /
+    xpassed)."""
+    return {
+        "blocks": list(_g_xfailBlocks),
+        "wholeTestReason": _g_xfailWholeTestReason,
+    }
+
+
+##############################################################################
 # Internal type-check utilities
 ##############################################################################
 
@@ -448,6 +478,53 @@ def checkFileReadOnly(fn: str) :
         passTest(f"File read only - '{fn}'")
     else :
         failTest(f"File writeable - '{fn}'")
+
+
+class expectFail :
+    """Context manager that marks a block of checks as "known broken". A FAIL
+    inside the block is swallowed and reported as XFAIL (test continues, suite
+    exit code is not affected). If the block runs without any FAIL the
+    outcome is XPASS — the bug appears fixed and the wrapper should be
+    removed; XPASS counts as a suite failure.
+
+    Only TestFailed is treated as the expected failure. Other exceptions
+    propagate normally and are reported as ERROR; an unhandled exception
+    indicates a broken test, not a known bug."""
+
+    def __init__(self, reason: str) :
+        self._reason = reason
+
+    def __enter__(self) :
+        global _g_indentLevel
+        print(f"{_doIndentString()}    {Fore.YELLOW}Expecting failure: {self._reason}{Style.RESET_ALL}")
+        _g_indentLevel += 1
+        return self
+
+    def __exit__(self, excType, excVal, tb) :
+        global _g_indentLevel, _g_xfailBlocks
+        _g_indentLevel -= 1
+        if excType is TestFailed :
+            _g_xfailBlocks.append({"outcome": "xfail", "reason": self._reason})
+            print(f"{_doIndentString()}    {Fore.YELLOW}XFAIL: {self._reason}{Style.RESET_ALL}")
+            return True
+        if excType is None :
+            _g_xfailBlocks.append({"outcome": "xpass", "reason": self._reason})
+            print(f"{_doIndentString()}    {Fore.RED}XPASS: {self._reason} "
+                  f"— bug appears fixed, remove the expectFail wrapper{Style.RESET_ALL}")
+            return False
+        # Any other exception (test error, KeyboardInterrupt, etc.) propagates
+        # untouched; an unhandled exception means a broken test, not a known bug.
+        return False
+
+
+def expectTestFails(reason: str) :
+    """Mark the entire current test as expected-to-fail. If the test ends in
+    TestFailed the outcome is XFAIL; if the test ends without any FAIL the
+    outcome is XPASS (and the suite fails). Call this near the top of the
+    test; the marker stays in effect until the test ends."""
+    global _g_xfailWholeTestReason
+    _g_xfailWholeTestReason = reason
+    print(f"{_doIndentString()}    {Fore.YELLOW}Expecting test to fail: {reason}{Style.RESET_ALL}")
 
 
 def variantBegin(msg: str) :
