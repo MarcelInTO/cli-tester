@@ -8,9 +8,9 @@ import re
 import shutil
 import stat
 import subprocess
+import textwrap
 
-from colorama import Fore, Back, Style, init as _colorama_init
-from typing import Tuple
+from colorama import Fore, Style, init as _colorama_init
 
 # Initialize colorama at import so any consumer importing the API gets working
 # color output without needing to call init() themselves. Safe to call repeatedly.
@@ -18,7 +18,7 @@ _colorama_init()
 
 
 ##############################################################################
-# Public exception type used to signal a single failing test
+# Public exception used to signal a single failing test
 ##############################################################################
 
 class TestFailed(Exception):
@@ -35,10 +35,7 @@ _g_indentLevel = 1
 
 def _doIndentString() -> str :
     global _g_indentLevel
-    ret = ""
-    for x in range(_g_indentLevel) :
-        ret += "    "
-    return ret
+    return "    " * _g_indentLevel
 
 
 def _resetIndentLevel() :
@@ -49,355 +46,353 @@ def _resetIndentLevel() :
 
 
 ##############################################################################
-# Useful utilities used internally
+# Internal type-check utilities
 ##############################################################################
 
-def _isString(v) :
+def _isString(v) -> bool :
     return isinstance(v, str)
 
 
-def _isListOfStrings(v) :
-    if hasattr(v, '__len__') and (not isinstance(v, str)):
+def _isListOfStrings(v) -> bool :
+    if hasattr(v, '__len__') and not isinstance(v, str) :
         for x in v :
             if not _isString(x) :
                 return False
         return True
     return False
 
-def _isListOfJsonFields(v) :
-    if hasattr(v, '__len__') :
-        for x in v :
-            if not isinstance(x, dict):
-                return False
-            if not "field" in x.keys() :
-                return False
-            if not "test_type" in x.keys() :
-                return False
-            else :
-                if x["test_type"] not in ["unorderedArrayMatch", "arraySize", "valueEqual", "valueNotEqual"] :
-                    return False
-            if not "test_value" in x.keys() :
-                return False
-        return True
-    return False
 
-def _isStringOrList(v) :
+def _isListOfJsonFields(v) -> bool :
+    if not hasattr(v, '__len__') :
+        return False
+    for x in v :
+        if not isinstance(x, dict) :
+            return False
+        if "field" not in x or "test_value" not in x :
+            return False
+        if x.get("test_type") not in ("unorderedArrayMatch", "arraySize", "valueEqual", "valueNotEqual") :
+            return False
+    return True
+
+
+def _isStringOrList(v) -> bool :
     return _isString(v) or _isListOfStrings(v)
 
 
-def _isInteger(n) :
-    if isinstance(n, int):
-        return True
-    if isinstance(n, float):
-        return n.is_integer()
-    return False
+def _isInteger(n) -> bool :
+    # Booleans are technically ints in Python; exclude them so True/False
+    # cannot be silently accepted as a returncode value.
+    return isinstance(n, int) and not isinstance(n, bool)
 
 
-def _matchBasic(pattern, theString) -> Tuple[bool, str]:
+##############################################################################
+# Internal regex matching helpers
+##############################################################################
+
+def _matchBasic(pattern, theString) -> tuple[bool, str] :
     return re.search(pattern, theString, flags=re.MULTILINE) is not None, pattern
 
 
-def _matchAll(patternList, theString) -> Tuple[bool, str]:
+def _matchAll(patternList, theString) -> tuple[bool, str] :
     if _isListOfStrings(patternList) :
-        for x in patternList:
-            ret, pat =  _matchBasic(x, theString)
+        for x in patternList :
+            ret, pat = _matchBasic(x, theString)
             if not ret :
                 return False, pat
         return True, "All"
-    else:
+    else :
         return _matchBasic(patternList, theString)
 
 
-def _matchOne(patternList, theString) :
+def _matchOne(patternList, theString) -> tuple[bool, str] :
     if _isListOfStrings(patternList) :
-        for x in patternList:
-            ret, pat =  _matchBasic(x, theString)
+        for x in patternList :
+            ret, pat = _matchBasic(x, theString)
             if ret :
                 return True, pat
         return False, "None"
-    else:
+    else :
         return _matchBasic(patternList, theString)
 
 
-def _endTest(status : bool):
+##############################################################################
+# Internal command-descriptor validation
+##############################################################################
+
+def _endTest() :
     raise TestFailed()
 
 
-def _validateCommandStruct(v) :
+# Table of recognised keys in a checkRunCommand testvals dict. Each entry maps
+# the key name to (validator, human description). A None value for any key is
+# always accepted (treated as 'not set'). Length-having values must also be
+# non-empty.
+_DESCRIPTOR_VALIDATORS = {
+    "cmd":                   (_isListOfStrings,    "a non-empty list of strings"),
+    "expect_stdout":         (_isStringOrList,     "a non-empty string or list of strings"),
+    "dontexpect_stdout":     (_isStringOrList,     "a non-empty string or list of strings"),
+    "expect_stderr":         (_isStringOrList,     "a non-empty string or list of strings"),
+    "dontexpect_stderr":     (_isStringOrList,     "a non-empty string or list of strings"),
+    "expect_returncode":     (_isInteger,          "an integer"),
+    "dontexpect_returncode": (_isInteger,          "an integer"),
+    "check_json_stdout":     (_isListOfJsonFields, "a non-empty list of JSON field tests"),
+}
+
+
+def _validateCommandStruct(v) -> bool :
     if not isinstance(v, dict) :
-        print(f"WARNING: invalid command descriptor. Must be a dict.")
+        print("WARNING: invalid command descriptor. Must be a dict.")
         return False
-
-    for k in v :
-        if k == "cmd" :
-            if v[k] is not None and (not _isListOfStrings(v[k]) or len(v[k]) == 0) :
-                print(f"    WARN: Must have a valid 'cmd' value which contains a list of strings.")
-                return False
-
-        elif k == "expect_stdout" :
-            if v[k] is not None and (not _isStringOrList(v[k]) or len(v[k]) == 0) :
-                print(f"    WARN: If 'expect_stdout' is not None, it must be a valid string, or list of strings.")
-                return False
-
-        elif k == "check_json_stdout" :
-            if v[k] is not None and (not _isListOfJsonFields(v[k]) or len(v[k]) == 0) :
-                print(f"    WARN: If 'check_json_stdout' is not None, it must be a valid list of json field tests.")
-                return False
-
-        elif k == "dontexpect_stdout" :
-            if v[k] is not None and (not _isStringOrList(v[k]) or len(v[k]) == 0) :
-                print(f"    WARN: If 'dontexpect_stdout' is not None, it must be a valid string, or list of strings.")
-                return False
-
-        elif k ==  "expect_stderr" :
-            if v[k] is not None and (not _isStringOrList(v[k]) or len(v[k]) == 0) :
-                print(f"    WARN: If 'expect_stderr' is not None, it must be a valid string, or list of strings.")
-                return False
-
-        elif k ==  "dontexpect_stderr" :
-            if v[k] is not None and (not _isStringOrList(v[k]) or len(v[k]) == 0) :
-                print(f"    WARN: If 'dontexpect_stderr' is not None, it must be a valid string, or list of strings.")
-                return False
-
-        elif k == "expect_returncode" :
-            if v[k] is not None and (not _isInteger(v[k])) :
-                print(f"    WARN: If 'expect_returncode' is not None, it must be a valid integer.")
-                return False
-
-        elif k == "dontexpect_returncode" :
-            if v[k] is not None and (not _isInteger(v[k])) :
-                print(f"    WARN: If 'dontexpect_returncode' is not None, it must be a valid integer.")
-                return False
-
-        else :
-            print(f"    WARN: Unrecognized entry '{k}' found. ")
+    for key, val in v.items() :
+        if key not in _DESCRIPTOR_VALIDATORS :
+            print(f"    WARN: Unrecognized entry '{key}' found.")
             return False
-
+        if val is None :
+            continue
+        check, desc = _DESCRIPTOR_VALIDATORS[key]
+        if not check(val) :
+            print(f"    WARN: '{key}' must be {desc}.")
+            return False
+        if hasattr(val, '__len__') and len(val) == 0 :
+            print(f"    WARN: '{key}' must be {desc} (got empty).")
+            return False
     return True
 
+
+##############################################################################
+# Internal filesystem and JSON helpers
+##############################################################################
+
 def _funcDeleteRw(action, name, exc) :
-    global stat
     os.chmod(name, stat.S_IWRITE)
     os.remove(name)
 
-def _findJsonField(jsonString : str, fieldSpec : str):
+
+def _findJsonField(jsonString: str, fieldSpec: str) -> tuple[bool, object] :
     # Return (False, None) on non-JSON input rather than letting JSONDecodeError
-    # bubble up as an unhandled exception. The caller treats False/None as
-    # "field not found" and emits a clean BAD line.
-    try:
+    # bubble up. checkRunCommand also validates JSON once up front so the user
+    # gets a single clear "not valid JSON" message instead of a flood of
+    # "invalid field" messages.
+    try :
         data = json.loads(jsonString)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError :
         return False, None
 
-    fieldNames = fieldSpec.split('.')
     currentValue = data
-    for field in fieldNames:
-        if '[' in field and ']' in field:
+    for field in fieldSpec.split('.') :
+        if '[' in field and ']' in field :
             fieldName, arrayIndex = field.split('[')
             arrayIndex = int(arrayIndex.replace(']', ''))
-            if fieldName in currentValue and isinstance(currentValue[fieldName], list) and len(currentValue[fieldName]) > arrayIndex:
+            if fieldName in currentValue and isinstance(currentValue[fieldName], list) and len(currentValue[fieldName]) > arrayIndex :
                 currentValue = currentValue[fieldName][arrayIndex]
-            else:
+            else :
                 return False, None
-        elif field in currentValue:
+        elif field in currentValue :
             currentValue = currentValue[field]
-        else:
+        else :
             return False, None
-
     return True, currentValue
-
-def _getJsonField(jsonString : str, field : str) -> str :
-    exists, value = _findJsonField(jsonString, field)
-    if exists :
-        return value
-    else:
-        return ""
-
-def _getJsonFieldExists(jsonString : str, field : str) -> bool :
-    exists, value = _findJsonField(jsonString, field)
-    return exists
-
 
 
 ##############################################################################
 # Public functions for generating regex
 ##############################################################################
 
-def xEscape(v) :
+def xEscape(v: str) -> str :
     return re.escape(v)
 
-def xAnywhere(v) :
+
+def xAnywhere(v: str) -> str :
+    """No-op marker: returns v unchanged. Use to document intent that a regex
+    is meant to match anywhere in the output."""
     return v
 
-def xAnywhereSameLine(v1, v2) :
+
+def xAnywhereSameLine(v1: str, v2: str) -> str :
     return v1 + r".*" + v2
 
-def xAnywhereConsecutiveLines(v1, v2) :
+
+def xAnywhereConsecutiveLines(v1: str, v2: str) -> str :
     return v1 + r".*\r?\n.*" + v2
 
-def xFullLine(v) :
+
+def xFullLine(v: str) -> str :
     return r"^" + v + r"\r?\n"
 
-def xLastFullLine(v) :
+
+def xLastFullLine(v: str) -> str :
     return xFullLine(v) + r"\Z"
 
 
-def xBeginningOfLine(v) :
+def xBeginningOfLine(v: str) -> str :
     return r"^" + v
 
 
 ##############################################################################
-# Core functions for writing/controlling tests
+# Public functions for writing and controlling tests
 ##############################################################################
 
 def operatingSystem() -> str :
-    global platform
     return platform.system()
 
-def deleteFolder(name : str) :
-    global shutil
+
+def deleteFolder(name: str) :
     shutil.rmtree(name, onerror=_funcDeleteRw)
 
 
-
-def failTest(message : str):
+def failTest(message: str) :
+    """Fail the current test with the given message. Does not return."""
     print(f"{_doIndentString()}    {Fore.RED}FAIL: ({message}){Style.RESET_ALL}")
     raise TestFailed(message)
 
 
-def passTest(message : str) :
+def passTest(message: str) :
+    """Log an informational pass. Does not terminate the test. Useful when you
+    want to record a passing checkpoint that does not fit any of the check*
+    functions; unlike failTest this is for logging only, not assertion."""
     print(f"{_doIndentString()}    {Fore.GREEN}PASS: ({message}){Style.RESET_ALL}")
 
 
-
-def checkRunCommand(testvals, useShell = False) :
+def checkRunCommand(testvals: dict, useShell: bool = False) -> tuple[int, str, str] :
     firstfail = True
     def firstFailFunc() :
         nonlocal firstfail
-        if firstfail:
+        if firstfail :
             firstfail = False
             print(f"{_doIndentString()}    {Fore.RED}FAIL: {testvals['cmd']}{Style.RESET_ALL}")
 
-    def entryExists(k) :
-        nonlocal testvals
+    def entryExists(k: str) -> bool :
         return k in testvals and testvals[k] is not None
 
-    # If the command descriptor is invalid, we have not choice but to fail right away.
-    # However, if its valid, we run through all the checks before failing so that the
-    # user can get a list of all the errors at once.
-
+    # If the descriptor itself is malformed there is no point running anything.
+    # Validation prints any per-key warnings before we get here.
     if not _validateCommandStruct(testvals) :
         firstFailFunc()
-        print(f"        invalid test command descriptor")
-        _endTest(False)
+        print("        invalid test command descriptor")
+        _endTest()
 
-    # The executable might not be found and subprocess.run does not deal with that
-    # gracefully. So check first. Skip this check when useShell=True because cmd[0]
-    # may legitimately contain shell syntax (pipelines, redirects, etc.) that
-    # shutil.which cannot resolve.
+    # The executable might not be found and subprocess.run does not deal with
+    # that gracefully. Skip the existence check in shell mode because cmd[0]
+    # may legitimately contain shell syntax (pipelines, redirects, etc.)
+    # that shutil.which cannot resolve.
     if not useShell and not shutil.which(testvals["cmd"][0]) :
         firstFailFunc()
         print(f"{_doIndentString()}        {Fore.RED}BAD:  command not found '{testvals['cmd'][0]}'{Style.RESET_ALL}")
-        _endTest(False)
+        _endTest()
 
-    # subprocess.run with shell=True expects a single command string, not a list.
-    # Passing a list with shell=True silently runs cmd[0] as the script with cmd[1:]
-    # as positional args to the shell, which is never what the caller wants. Join
-    # to a string so shell features like pipes and redirects work as expected.
+    # subprocess.run with shell=True expects a single command string, not a
+    # list. Passing a list with shell=True silently runs cmd[0] as the script
+    # with cmd[1:] as positional args to the shell, which is never what the
+    # caller wants. Join to a string so shell features like pipes and
+    # redirects work as expected.
     cmdToRun = " ".join(testvals["cmd"]) if useShell else testvals["cmd"]
     result = subprocess.run(cmdToRun, capture_output=True, shell=useShell)
 
+    stdoutText = result.stdout.decode('utf-8')
+    stderrText = result.stderr.decode('utf-8')
+
     oklist = []
+
     if entryExists("expect_returncode") :
         if result.returncode != testvals["expect_returncode"] :
             firstFailFunc()
             print(f"{_doIndentString()}        {Fore.RED}BAD:  expect_returncode [got {result.returncode}, expected {testvals['expect_returncode']}]{Style.RESET_ALL}")
-        else:
+        else :
             oklist.append("expect_returncode")
 
     if entryExists("dontexpect_returncode") :
         if result.returncode == testvals["dontexpect_returncode"] :
             firstFailFunc()
             print(f"{_doIndentString()}        {Fore.RED}BAD:  dontexpect_returncode{Style.RESET_ALL}")
-        else:
+        else :
             oklist.append("dontexpect_returncode")
 
     if entryExists("expect_stdout") :
-        ret, pat = _matchAll(testvals["expect_stdout"], result.stdout.decode('utf-8'))
+        ret, pat = _matchAll(testvals["expect_stdout"], stdoutText)
         if not ret :
             firstFailFunc()
             print(f"{_doIndentString()}        {Fore.RED}BAD:  expect_stdout [failed regex r\"{pat}\"]{Style.RESET_ALL}")
-        else:
+        else :
             oklist.append("expect_stdout")
 
     if entryExists("check_json_stdout") :
-        allOk = True
-        for ftest in testvals["check_json_stdout"] :
-            ftestField = ftest['field']
-            ftestType = ftest['test_type']
-            ftestValue = ftest['test_value']
+        # Validate stdout is JSON once, up front, so a non-JSON stdout produces
+        # a single clear message instead of a flood of "invalid field" lines.
+        jsonValid = True
+        try :
+            json.loads(stdoutText)
+        except json.JSONDecodeError as e :
+            firstFailFunc()
+            print(f"{_doIndentString()}        {Fore.RED}BAD:  check_json_stdout [stdout is not valid JSON: {e.msg}]{Style.RESET_ALL}")
+            jsonValid = False
 
-            resultFieldExists, resultFieldValue = _findJsonField(result.stdout.decode('utf-8'), ftestField)
-            if resultFieldExists:
-                if ftestType == "unorderedArrayMatch" :
-                    if (set(ftestValue) != set(resultFieldValue)) :
-                        firstFailFunc()
-                        print(f"{_doIndentString()}        {Fore.RED}BAD:  check_json_stdout [sets do not match for field '{ftestField}'")
-                        allOk = False
-                elif ftestType == "arraySize" :
-                    if (resultFieldValue is None) :
-                        if ftestValue != 0:
+        if jsonValid :
+            allOk = True
+            for ftest in testvals["check_json_stdout"] :
+                ftestField = ftest['field']
+                ftestType = ftest['test_type']
+                ftestValue = ftest['test_value']
+
+                resultFieldExists, resultFieldValue = _findJsonField(stdoutText, ftestField)
+                if resultFieldExists :
+                    if ftestType == "unorderedArrayMatch" :
+                        if set(ftestValue) != set(resultFieldValue) :
                             firstFailFunc()
-                            print(f"{_doIndentString()}        {Fore.RED}BAD:  check_json_stdout [array size is 0 for field '{ftestField}'")
+                            print(f"{_doIndentString()}        {Fore.RED}BAD:  check_json_stdout [sets do not match for field '{ftestField}']{Style.RESET_ALL}")
                             allOk = False
-                    elif (ftestValue != len(resultFieldValue)) :
+                    elif ftestType == "arraySize" :
+                        if resultFieldValue is None :
+                            if ftestValue != 0 :
+                                firstFailFunc()
+                                print(f"{_doIndentString()}        {Fore.RED}BAD:  check_json_stdout [array size is 0 for field '{ftestField}']{Style.RESET_ALL}")
+                                allOk = False
+                        elif ftestValue != len(resultFieldValue) :
+                            firstFailFunc()
+                            print(f"{_doIndentString()}        {Fore.RED}BAD:  check_json_stdout [array sizes do not match for field '{ftestField}']{Style.RESET_ALL}")
+                            allOk = False
+                    elif ftestType == "valueEqual" :
+                        if ftestValue != resultFieldValue :
+                            firstFailFunc()
+                            print(f"{_doIndentString()}        {Fore.RED}BAD:  check_json_stdout [values do not match for field '{ftestField}']{Style.RESET_ALL}")
+                            allOk = False
+                    elif ftestType == "valueNotEqual" :
+                        if ftestValue == resultFieldValue :
+                            firstFailFunc()
+                            print(f"{_doIndentString()}        {Fore.RED}BAD:  check_json_stdout [values match for field '{ftestField}']{Style.RESET_ALL}")
+                            allOk = False
+                    else :
                         firstFailFunc()
-                        print(f"{_doIndentString()}        {Fore.RED}BAD:  check_json_stdout [array sizes do not match for field '{ftestField}'")
+                        print(f"{_doIndentString()}        {Fore.RED}BAD:  check_json_stdout [invalid test type '{ftestType}']{Style.RESET_ALL}")
                         allOk = False
-                elif ftestType == "valueEqual" :
-                    if (ftestValue != resultFieldValue) :
-                        firstFailFunc()
-                        print(f"{_doIndentString()}        {Fore.RED}BAD:  check_json_stdout [values do not match for field '{ftestField}'")
-                        allOk = False
-                elif ftestType == "valueNotEqual" :
-                    if (ftestValue == resultFieldValue) :
-                        firstFailFunc()
-                        print(f"{_doIndentString()}        {Fore.RED}BAD:  check_json_stdout [values match for field '{ftestField}'")
-                        allOk = False
-                else:
+                else :
                     firstFailFunc()
-                    print(f"{_doIndentString()}        {Fore.RED}BAD:  check_json_stdout [invalid test type '{ftestType}'")
+                    print(f"{_doIndentString()}        {Fore.RED}BAD:  check_json_stdout [invalid field name '{ftest['field']}']{Style.RESET_ALL}")
                     allOk = False
-            else:
-                firstFailFunc()
-                print(f"{_doIndentString()}        {Fore.RED}BAD:  check_json_stdout [invalid field name '{ftest['field']}'")
-                allOk = False
-        if allOk :
-            oklist.append("check_json_stdout")
-
+            if allOk :
+                oklist.append("check_json_stdout")
 
     if entryExists("dontexpect_stdout") :
-        ret, pat = _matchOne(testvals["dontexpect_stdout"], result.stdout.decode('utf-8'))
-        if  ret :
+        ret, pat = _matchOne(testvals["dontexpect_stdout"], stdoutText)
+        if ret :
             firstFailFunc()
             print(f"{_doIndentString()}        {Fore.RED}BAD:  dontexpect_stdout [failed regex r\"{pat}\"]{Style.RESET_ALL}")
-        else:
+        else :
             oklist.append("dontexpect_stdout")
 
     if entryExists("expect_stderr") :
-        ret, pat = _matchAll(testvals["expect_stderr"], result.stderr.decode('utf-8'))
+        ret, pat = _matchAll(testvals["expect_stderr"], stderrText)
         if not ret :
             firstFailFunc()
             print(f"{_doIndentString()}        {Fore.RED}BAD:  expect_stderr [failed regex r\"{pat}\"]{Style.RESET_ALL}")
-        else:
+        else :
             oklist.append("expect_stderr")
 
     if entryExists("dontexpect_stderr") :
-        ret, pat = _matchOne(testvals["dontexpect_stderr"], result.stderr.decode('utf-8'))
+        ret, pat = _matchOne(testvals["dontexpect_stderr"], stderrText)
         if ret :
             firstFailFunc()
             print(f"{_doIndentString()}        {Fore.RED}BAD:  dontexpect_stderr [failed regex r\"{pat}\"]{Style.RESET_ALL}")
-        else:
+        else :
             oklist.append("dontexpect_stderr")
 
     if not firstfail :
@@ -405,90 +400,80 @@ def checkRunCommand(testvals, useShell = False) :
             print(f"{_doIndentString()}        {Fore.GREEN}OK:   {x}{Style.RESET_ALL}")
 
         if result.returncode != 0 :
-            _msgLines = result.stderr.decode('utf-8').splitlines()
             print(f"{_doIndentString()}        {Fore.RED}STDERR:{Style.RESET_ALL}")
-            for l in _msgLines:
-                print(f"{_doIndentString()}            {l}")
-            _msgLines = result.stdout.decode('utf-8').splitlines()
+            for line in stderrText.splitlines() :
+                print(f"{_doIndentString()}            {line}")
             print(f"{_doIndentString()}        {Fore.RED}STDOUT:{Style.RESET_ALL}")
-            for l in _msgLines:
-                print(f"{_doIndentString()}            {l}")
+            for line in stdoutText.splitlines() :
+                print(f"{_doIndentString()}            {line}")
 
-        _endTest(False)
+        _endTest()
 
     print(f"{_doIndentString()}    {Fore.GREEN}PASS: {testvals['cmd']}{Style.RESET_ALL}")
+    return result.returncode, stdoutText, stderrText
 
-    return result.returncode, result.stdout.decode('utf-8'), result.stderr.decode('utf-8')
 
-
-def checkRunShellCommand(testvals) :
+def checkRunShellCommand(testvals: dict) -> tuple[int, str, str] :
     return checkRunCommand(testvals, True)
 
 
-def checkPathExists(fn : str) :
+def checkPathExists(fn: str) :
     if os.path.exists(fn) :
-        print(f"{_doIndentString()}    {Fore.GREEN}PASS: (File exists - '{fn}'){Style.RESET_ALL}")
-    else:
-        print(f"{_doIndentString()}    {Fore.RED}FAIL: (File missing - '{fn}'){Style.RESET_ALL}")
-        _endTest(False)
+        passTest(f"File exists - '{fn}'")
+    else :
+        failTest(f"File missing - '{fn}'")
 
-def checkPathNotExists(fn : str) :
+
+def checkPathNotExists(fn: str) :
     if not os.path.exists(fn) :
-        print(f"{_doIndentString()}    {Fore.GREEN}PASS: (File missing - '{fn}'){Style.RESET_ALL}")
-    else:
-        print(f"{_doIndentString()}    {Fore.RED}FAIL: (File exists - '{fn}'){Style.RESET_ALL}")
-        _endTest(False)
+        passTest(f"File missing - '{fn}'")
+    else :
+        failTest(f"File exists - '{fn}'")
 
 
-def checkFileWriteable(fn : str) :
+def checkFileWriteable(fn: str) :
     if os.access(fn, os.W_OK) :
-        print(f"{_doIndentString()}    {Fore.GREEN}PASS: (File writeable - '{fn}'){Style.RESET_ALL}")
-    else:
-        print(f"{_doIndentString()}    {Fore.RED}FAIL: (File not writeable - '{fn}'){Style.RESET_ALL}")
-        _endTest(False)
+        passTest(f"File writeable - '{fn}'")
+    else :
+        failTest(f"File not writeable - '{fn}'")
 
-def checkFileReadOnly(fn : str) :
+
+def checkFileReadOnly(fn: str) :
     if not os.access(fn, os.W_OK) :
-        print(f"{_doIndentString()}    {Fore.GREEN}PASS: (File read only - '{fn}'){Style.RESET_ALL}")
-    else:
-        print(f"{_doIndentString()}    {Fore.RED}FAIL: (File writeable - '{fn}'){Style.RESET_ALL}")
-        _endTest(False)
+        passTest(f"File read only - '{fn}'")
+    else :
+        failTest(f"File writeable - '{fn}'")
 
-def variantBegin(msg : str) :
+
+def variantBegin(msg: str) :
     global _g_indentLevel
     print(f"{_doIndentString()}    {Fore.YELLOW}Executing variant: {msg}{Style.RESET_ALL}")
     _g_indentLevel += 1
+
 
 def variantEnd() :
     global _g_indentLevel
     _g_indentLevel -= 1
 
-def sectionBegin(msg : str) :
+
+def sectionBegin(msg: str) :
     global _g_indentLevel
     print(f"{Fore.BLUE}{indentAndWrap(msg, _doIndentString() + '    ', 72)}{Style.RESET_ALL}")
     _g_indentLevel += 1
+
 
 def sectionEnd() :
     global _g_indentLevel
     _g_indentLevel -= 1
 
 
-def indentAndWrap(inputString, indentPrefix, maxLineLength=72):
-    import textwrap
-
+def indentAndWrap(inputString: str, indentPrefix: str, maxLineLength: int = 72) -> str :
     # Replace both Unix-style and Windows-style line breaks with spaces
     inputString = inputString.replace('\n', ' ').replace('\r', '')
 
     # Remove leading space if it was originally a line break
     inputString = inputString.lstrip()
 
-    # Wrap the inputString
     wrappedLines = textwrap.wrap(inputString, width=maxLineLength - len(indentPrefix))
-
-    # Add the indentPrefix to each line
     outputLines = [indentPrefix + line for line in wrappedLines]
-
-    # Join the lines into a single string
-    outputString = '\n'.join(outputLines)
-
-    return outputString
+    return '\n'.join(outputLines)
