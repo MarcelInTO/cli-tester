@@ -220,7 +220,7 @@ def _applyXfail(status, message, xfailState) :
             return "xfailed", wholeTestReason
         # status was "passed" (or any non-fail outcome we accept): the bug
         # appears fixed, so the marker is stale — flag as xpass.
-        return "xpassed", (f"{wholeTestReason} — bug appears fixed, "
+        return "xpassed", (f"{wholeTestReason} - bug appears fixed, "
                            f"remove the expectTestFails() call")
 
     if status == "failed" :
@@ -229,7 +229,7 @@ def _applyXfail(status, message, xfailState) :
     xpassReasons = [b["reason"] for b in blocks if b["outcome"] == "xpass"]
     xfailReasons = [b["reason"] for b in blocks if b["outcome"] == "xfail"]
     if xpassReasons :
-        return "xpassed", "; ".join(xpassReasons) + " — remove the expectFail wrapper"
+        return "xpassed", "; ".join(xpassReasons) + " - remove the expectFail wrapper"
     if xfailReasons :
         return "xfailed", "; ".join(xfailReasons)
     return status, message

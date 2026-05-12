@@ -510,7 +510,7 @@ class expectFail :
         if excType is None :
             _g_xfailBlocks.append({"outcome": "xpass", "reason": self._reason})
             print(f"{_doIndentString()}    {Fore.RED}XPASS: {self._reason} "
-                  f"— bug appears fixed, remove the expectFail wrapper{Style.RESET_ALL}")
+                  f"- bug appears fixed, remove the expectFail wrapper{Style.RESET_ALL}")
             return False
         # Any other exception (test error, KeyboardInterrupt, etc.) propagates
         # untouched; an unhandled exception means a broken test, not a known bug.
