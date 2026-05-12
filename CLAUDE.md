@@ -11,16 +11,16 @@ Tests are plain Python files that `from wct import ...` and call check functions
 ## Running
 
 ```
-wct <test_path_or_glob> [<test_path_or_glob> ...] [-p PATH] [-v]
+wct <test_path_or_glob> [<test_path_or_glob> ...] [-p PATH] [-v] [--setup PATH] [--teardown PATH]
 ```
 
 Globs use `**` to match arbitrary subdirectories. The runner exits `0` on full pass, `1` if anything failed or errored, `2` if no tests matched.
 
 ## Architecture
 
-- **`src/wct/__init__.py`** — the test API surface. Tests `from wct import ...` and call check functions. The failure model: each `check*` prints a FAIL line, then calls `_endTest` which raises `TestFailed`. Output indentation is tracked by a module-global `_g_indentLevel` and reset between tests by `_resetIndentLevel`.
-- **`src/wct/cli.py`** — the `wct` entry point. Parses args, glob-expands test paths, then loops in-process: reset workspace, `chdir` into it, reset indent, `runpy.run_path(testfile, run_name="__main__")`, catch `TestFailed`/`SystemExit`/`Exception`. Summarizes counts and returns a non-zero exit code if anything failed.
-- **`src/wct/_workspace.py`** — wipes and recreates the workspace at `~/.cache/wct/run-<pid>/runroot/`. Two cross-platform invariants:
+- **`src/wct/__init__.py`** — the test API surface. Tests `from wct import ...` and call check functions. The failure model: each `check*` prints a FAIL line, then calls `_endTest` which raises `TestFailed`. Output indentation is tracked by a module-global `_g_indentLevel` and reset between tests by `_resetIndentLevel`. Also exports the suite-level helpers used by `--setup` / `--teardown` scripts: `exportEnv` (env var that propagates to every test) and `setState` / `getState` (write-through state channel routed through a JSON file — deliberately *not* placed in the environment so it stays invisible to tests that don't ask for it).
+- **`src/wct/cli.py`** — the `wct` entry point. Parses args, glob-expands test paths, then loops in-process: reset workspace, `chdir` into it, reset indent, `runpy.run_path(testfile, run_name="__main__")`, catch `TestFailed`/`SystemExit`/`Exception`. Summarizes counts and returns a non-zero exit code if anything failed. When `--setup` / `--teardown` are present, those scripts run via the same `runpy` mechanism but in the caller's cwd (not a per-test workspace), bracketing the test loop. Teardown always runs — even on setup failure (every collected test is then reported as errored) and on SIGINT. A SIGINT handler flips a stop-flag the loop checks between tests so teardown still gets to clean up; a second SIGINT restores the default handler and aborts.
+- **`src/wct/_workspace.py`** — wipes and recreates the workspace at `~/.cache/wct/run-<pid>/runroot/`, and exposes `getStateFilePath()` returning `~/.cache/wct/run-<pid>/state.json` for the setup/teardown state channel. Both share the per-PID base, so the same `atexit` cleanup handles them. Two cross-platform invariants:
   - *Per-PID isolation*: the per-PID path segment ensures a wct subprocess (e.g. a meta-test invoking wct against a fixture) gets its own workspace and can't wipe the outer wct's. Without it, the outer's cwd becomes a stale inode on Linux and the inner's `rmtree` fails outright on Windows.
   - *Step out before deleting*: `_stepOutOfWorkspace()` chdir's to `Path.home()` before any `shutil.rmtree`. Windows refuses to delete a directory in use as cwd (WinError 32); Linux is lenient and silently leaves a stale inode. The chdir-out is required for Windows and harmless on Unix.
 
@@ -47,3 +47,5 @@ The following look like inconsistencies but were reviewed in the step-7 API poli
 ## Workspace
 
 `~/.cache/wct/run-<pid>/runroot/` (via `platformdirs.user_cache_dir` plus PID segment for nested-wct isolation; see the Architecture section). Wiped between every test. Tests cannot rely on prior state. Preserving the workspace of a failing test for inspection is a future polish item — currently if test 3 fails, test 4 wipes the evidence.
+
+The setup/teardown state file (`~/.cache/wct/run-<pid>/state.json`) lives alongside `runroot/` in the per-PID base, so it is not affected by the per-test wipe but is cleaned up by the same `atexit` hook on normal exit.
