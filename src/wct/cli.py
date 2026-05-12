@@ -122,6 +122,31 @@ def _installSigintHandler() :
     signal.signal(signal.SIGINT, handler)
 
 
+def _runPath(absPath) :
+    """Wrap runpy.run_path so the script's directory is on sys.path for the
+    duration of the call, mirroring how `python script.py` makes a sibling
+    `from helpers import X` just work. On exit, restore sys.path AND drop any
+    modules loaded from scriptDir — restoring sys.path alone is not enough
+    because Python's sys.modules cache would still mask a same-named sibling
+    in a different test directory on the next invocation."""
+    scriptDir = os.path.dirname(absPath)
+    prevPath = list(sys.path)
+    prevModules = set(sys.modules)
+    sys.path.insert(0, scriptDir)
+    try :
+        runpy.run_path(absPath, run_name="__main__")
+    finally :
+        sys.path[:] = prevPath
+        for name in [n for n in sys.modules if n not in prevModules] :
+            mod = sys.modules.get(name)
+            modFile = getattr(mod, "__file__", None) if mod is not None else None
+            if not modFile :
+                continue
+            modDir = os.path.dirname(os.path.abspath(modFile))
+            if modDir == scriptDir or modDir.startswith(scriptDir + os.sep) :
+                del sys.modules[name]
+
+
 def _runScript(displayPath, absPath, header, name, classname) -> dict :
     """Run a setup or teardown script using the same in-process runpy mechanism
     as tests, but without a workspace reset — these scripts run in the caller's
@@ -134,7 +159,7 @@ def _runScript(displayPath, absPath, header, name, classname) -> dict :
     startTime = time.monotonic()
 
     try :
-        runpy.run_path(absPath, run_name="__main__")
+        _runPath(absPath)
     except TestFailed as e :
         status = "failed"
         message = str(e)
@@ -255,7 +280,7 @@ def main() -> int :
             startTime = time.monotonic()
 
             try :
-                runpy.run_path(absTest, run_name="__main__")
+                _runPath(absTest)
             except TestFailed as e :
                 status = "failed"
                 message = str(e)
