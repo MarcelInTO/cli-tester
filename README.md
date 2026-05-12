@@ -17,19 +17,27 @@ uv tool install --editable cli-tester
 
 ### Directly from the git URL
 
-Useful for consumers (CI jobs, other tools) that don't want a local checkout. For workstations with SSH access to studio.wevr.com:
+Useful for consumers (CI jobs, other tools) that don't want a local checkout. The project is public on studio.wevr.com, so no authentication is required for read access.
+
+For HTTPS (works anywhere, including CI jobs without any token setup):
+
+```sh
+uv tool install "git+https://studio.wevr.com/wevr-public/cli-tester.git@v1.0.0"
+```
+
+For workstations that already have SSH set up to studio.wevr.com:
 
 ```sh
 uv tool install "git+ssh://git@studio.wevr.com/wevr-public/cli-tester.git@v1.0.0"
 ```
 
-For another project's GitLab CI job, using the auto-injected `CI_JOB_TOKEN`:
+A full CI snippet for another project on this GitLab instance:
 
 ```yaml
 test:
   image: ghcr.io/astral-sh/uv:python3.10-bookworm-slim
   script:
-    - uv tool install "git+https://gitlab-ci-token:${CI_JOB_TOKEN}@studio.wevr.com/wevr-public/cli-tester.git@v1.0.0"
+    - uv tool install "git+https://studio.wevr.com/wevr-public/cli-tester.git@v1.0.0"
     - export PATH="$HOME/.local/bin:$PATH"
     - wct --junit junit.xml 'tests/test_*.py'
   artifacts:
@@ -38,8 +46,6 @@ test:
     reports:
       junit: junit.xml
 ```
-
-A one-time setup on the wct project is required for `CI_JOB_TOKEN` to grant the consumer access: **Settings → CI/CD → Token Access → Allowed projects/groups**, and add each consumer project (or its parent group). GitLab's default since 16.0 is to deny cross-project token access; you have to opt in.
 
 Pin to a tag (above) for stability against main-branch churn.
 
