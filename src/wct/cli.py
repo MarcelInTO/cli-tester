@@ -17,7 +17,15 @@ from colorama import Fore, Style
 from pathlib import Path
 from xml.etree.ElementTree import Element, ElementTree, SubElement
 
-from . import TestFailed, _getXfailState, _resetIndentLevel, _resetXfailState
+from . import (
+    TestFailed,
+    _closeInnermostScopeAs,
+    _getScopeResults,
+    _getXfailState,
+    _resetIndentLevel,
+    _resetScopeState,
+    _resetXfailState,
+)
 from ._workspace import getRunRoot, getStateFilePath, resetRunRoot
 
 
@@ -324,6 +332,7 @@ def main() -> int :
             # variantEnd). Reset so the next test's output is not corrupted.
             _resetIndentLevel()
             _resetXfailState()
+            _resetScopeState()
 
             print(f"    {Fore.YELLOW}Running test '{Path(displayPath).as_posix()}'{Style.RESET_ALL}")
 
@@ -354,13 +363,37 @@ def main() -> int :
             # broke, which is more important to surface than any xfail signal.
             status, message = _applyXfail(status, message, _getXfailState())
 
-            testResults.append({
-                "name": _testName(displayPath),
-                "classname": _testClassname(displayPath),
-                "duration": duration,
-                "status": status,
-                "message": message,
-            })
+            # If the test failed/errored while a scope was still open, attribute
+            # the failure to the innermost open scope. Outer open scopes are
+            # silently discarded — their content is the failing inner scope
+            # plus whatever closed cleanly inside them, already counted.
+            if status in ("failed", "errored", "xfailed", "xpassed") :
+                _closeInnermostScopeAs(status, message)
+
+            scopeResults = _getScopeResults()
+            if scopeResults :
+                # The file used variantBegin / sectionBegin: emit one testcase
+                # per scope, named "<filebasename>::<scope path>", so GitLab's
+                # Tests tab surfaces each section individually instead of
+                # collapsing the whole file into one row.
+                fileName = _testName(displayPath)
+                className = _testClassname(displayPath)
+                for sr in scopeResults :
+                    testResults.append({
+                        "name": f"{fileName}::{sr['scopePath']}",
+                        "classname": className,
+                        "duration": sr["duration"],
+                        "status": sr["status"],
+                        "message": sr["message"],
+                    })
+            else :
+                testResults.append({
+                    "name": _testName(displayPath),
+                    "classname": _testClassname(displayPath),
+                    "duration": duration,
+                    "status": status,
+                    "message": message,
+                })
 
     if teardownAbs :
         os.chdir(callerCwd)
