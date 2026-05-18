@@ -184,6 +184,8 @@ for target in ("linux", "macos", "windows"):
 sectionEnd()
 ```
 
+Beyond formatting the console output, sections and variants also become individual JUnit testcases (one per scope, named `<filebasename>::<scope path>`) so CI dashboards can surface them as distinct rows rather than collapsing the whole file into one. Files that don't use scopes still emit a single testcase per file.
+
 ### Shell features (pipes, redirects, glob expansion)
 
 `checkRunShellCommand` runs the command via the shell so shell syntax works:
@@ -346,6 +348,8 @@ test:
 ```
 
 GitLab surfaces per-test results in the merge-request widget via `artifacts:reports:junit`, and tracks flakiness over time. `when: always` ensures the report is uploaded even when the job fails — which is when you most want it.
+
+Test files that use `sectionBegin` / `variantBegin` emit one testcase per scope rather than one per file, so the Tests tab shows each labeled sub-test as its own row. If a section fails, sections that ran before it appear as passing and sections after it are absent (they were never reached). Files that don't use scopes emit a single testcase per file.
 
 When `--setup` or `--teardown` are used, the JUnit report includes synthetic testcases `__suite_setup__` and `__suite_teardown__` (under classname `wct.suite`) so failures there surface in CI alongside the real tests.
 

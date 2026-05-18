@@ -12,6 +12,7 @@ import shutil
 import stat
 import subprocess
 import textwrap
+import time
 
 from colorama import Fore, Style, init as _colorama_init
 
@@ -48,6 +49,79 @@ def _resetIndentLevel() :
     test-facing API."""
     global _g_indentLevel
     _g_indentLevel = 1
+
+
+##############################################################################
+# Internal scope state (variants + sections)
+##############################################################################
+
+# A "scope" is a named span opened by variantBegin or sectionBegin and closed
+# by the matching End call. When a test uses scopes, the runner emits one
+# JUnit testcase per scope rather than one per file, giving GitLab's Tests tab
+# the granularity to surface individual sub-tests by their section/variant
+# names. Scopes nest: each stack entry records its own start time, label,
+# and kind. Closed scopes are appended to _g_scopeResults in close order;
+# the runner consumes that list after each test.
+
+_g_scopeStack = []
+_g_scopeResults = []
+
+
+def _resetScopeState() :
+    """Reset scope bookkeeping between tests. Called by the runner."""
+    global _g_scopeStack, _g_scopeResults
+    _g_scopeStack = []
+    _g_scopeResults = []
+
+
+def _getScopeResults() :
+    """Return a snapshot of closed-scope outcomes for the current test."""
+    return list(_g_scopeResults)
+
+
+def _currentScopePath() -> str :
+    """Joined label path of currently-open scopes, for naming the testcase
+    that will own a not-yet-recorded outcome."""
+    return " / ".join(s["label"] for s in _g_scopeStack)
+
+
+def _pushScope(label: str, kind: str) :
+    _g_scopeStack.append({"label": label, "kind": kind, "startTime": time.monotonic()})
+
+
+def _popScopeAsPassed() :
+    """Pop the innermost open scope and record it as a passing testcase.
+    Called from variantEnd / sectionEnd. A stray End with no matching Begin
+    (test author bug) is ignored rather than raising — we don't want to
+    obscure a real failure with a runner exception."""
+    if not _g_scopeStack :
+        return
+    scope = _g_scopeStack.pop()
+    _g_scopeResults.append({
+        "scopePath": " / ".join(s["label"] for s in _g_scopeStack + [scope]),
+        "duration": time.monotonic() - scope["startTime"],
+        "status": "passed",
+        "message": "",
+    })
+
+
+def _closeInnermostScopeAs(status: str, message: str) :
+    """Close the innermost open scope as the given status, recording it as a
+    testcase result. Outer open scopes are discarded without emitting a
+    separate testcase — their content is the failing inner scope plus
+    whatever closed cleanly inside them, both of which are already counted.
+    No-op if no scope is open (the caller falls back to a file-level result)."""
+    if not _g_scopeStack :
+        return False
+    scope = _g_scopeStack[-1]
+    _g_scopeResults.append({
+        "scopePath": " / ".join(s["label"] for s in _g_scopeStack),
+        "duration": time.monotonic() - scope["startTime"],
+        "status": status,
+        "message": message,
+    })
+    _g_scopeStack.clear()
+    return True
 
 
 ##############################################################################
@@ -531,22 +605,26 @@ def variantBegin(msg: str) :
     global _g_indentLevel
     print(f"{_doIndentString()}    {Fore.YELLOW}Executing variant: {msg}{Style.RESET_ALL}")
     _g_indentLevel += 1
+    _pushScope(msg, "variant")
 
 
 def variantEnd() :
     global _g_indentLevel
     _g_indentLevel -= 1
+    _popScopeAsPassed()
 
 
 def sectionBegin(msg: str) :
     global _g_indentLevel
     print(f"{Fore.BLUE}{indentAndWrap(msg, _doIndentString() + '    ', 72)}{Style.RESET_ALL}")
     _g_indentLevel += 1
+    _pushScope(msg, "section")
 
 
 def sectionEnd() :
     global _g_indentLevel
     _g_indentLevel -= 1
+    _popScopeAsPassed()
 
 
 def indentAndWrap(inputString: str, indentPrefix: str, maxLineLength: int = 72) -> str :
