@@ -386,6 +386,19 @@ Use field paths like `data.items[0].name`. Supported `test_type` values:
 ]
 ```
 
+Indexes may be negative (`items[-1]` is the last element) and may chain
+(`matrix[1][2]`). When stdout is a bare top-level JSON array rather than an
+object, start the path with an index; an empty path (`""`) addresses the root
+value itself, which is how you assert on the bare array as a whole:
+
+```python
+# stdout: [{"name": "alpha"}, {"name": "beta"}]
+"check_json_stdout": [
+    {"field": "",         "test_type": "arraySize",  "test_value": 2},
+    {"field": "[0].name", "test_type": "valueEqual", "test_value": "alpha"},
+]
+```
+
 ### Filesystem checks
 
 - **`checkPathExists(path)`** — path must exist.
