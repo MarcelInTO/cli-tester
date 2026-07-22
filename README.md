@@ -8,9 +8,7 @@ wct is fully supported on Linux, macOS, and Windows: its own meta-test suite run
 
 ## Install
 
-WCT requires Python 3.10 or later. The recommended installer is [uv](https://docs.astral.sh/uv/), which manages its own Python — you don't need to install one separately.
-
-**WCT is not yet published to PyPI.** Until then, install from a clone or directly from the git URL.
+WCT requires Python 3.10 or later. The recommended installer is [uv](https://docs.astral.sh/uv/), which manages its own Python — you don't need to install one separately. Install from a clone or directly from the git URL.
 
 ### From a local clone
 
@@ -53,13 +51,7 @@ test:
 
 Pin to a tag (above) for stability against main-branch churn.
 
-### Once published to PyPI
-
-```sh
-uv tool install wct
-```
-
-`pipx install ...` and `pip install ...` will also work — `pyproject.toml` is standard.
+`pipx install` and `pip install` also work with the same git URLs — `pyproject.toml` is standard.
 
 ## Quick start
 
@@ -340,7 +332,7 @@ stages:
 test:
   stage: test
   script:
-    - uv tool install wct          # pre-PyPI: substitute your editable install
+    - uv tool install "git+https://github.com/MarcelInTO/cli-tester.git@v1.5.0"
     - export PATH="$HOME/.local/bin:$PATH"
     - wct --junit junit.xml 'tests/test_*.py'
   artifacts:

@@ -55,7 +55,7 @@ The setup/teardown state file (`~/.cache/wct/run-<pid>/state.json`) lives alongs
 The version string lives in **two** places that must move together on every bump:
 
 1. `version = "X.Y.Z"` in `pyproject.toml` (and the matching `uv.lock` entry).
-2. The `@vX.Y.Z` install pins in `README.md` — currently three: the HTTPS example, the SSH example, and the CI-snippet `uv tool install` line.
+2. The `@vX.Y.Z` install pins in `README.md` — currently four: the HTTPS example, the SSH example, and the `uv tool install` line in each of the two CI snippets (Install section and Continuous integration section).
 
 The README pins point consumers at a real published tag, so they lag by design: bump them to the tag you are about to cut. Before committing a release, `grep -n '@v[0-9]' README.md` and confirm every hit matches the new version — the 1.4.0 bump missed this and shipped a README pointing at the superseded 1.3.0 tag. Then tag `vX.Y.Z`, push the tag, and cut the matching GitLab release.
 
