@@ -277,6 +277,14 @@ def _funcDeleteRw(action, name, exc) :
     os.remove(name)
 
 
+# A path segment is an optional field name followed by any number of [N]
+# indexes. A segment with no field name ("[0]") indexes the current value
+# directly — that's what makes a bare top-level array addressable. Indexes
+# may be negative (Python semantics).
+_JSON_PATH_SEGMENT = re.compile(r'([^\[\]]*)((?:\[-?\d+\])*)')
+_JSON_PATH_INDEX = re.compile(r'\[(-?\d+)\]')
+
+
 def _findJsonField(jsonString: str, fieldSpec: str) -> tuple[bool, object] :
     # Return (False, None) on non-JSON input rather than letting JSONDecodeError
     # bubble up. checkRunCommand also validates JSON once up front so the user
@@ -287,19 +295,26 @@ def _findJsonField(jsonString: str, fieldSpec: str) -> tuple[bool, object] :
     except json.JSONDecodeError :
         return False, None
 
+    # An empty field spec addresses the root value itself — the only way to
+    # run arraySize/unorderedArrayMatch against a bare top-level array.
+    if fieldSpec == "" :
+        return True, data
+
     currentValue = data
-    for field in fieldSpec.split('.') :
-        if '[' in field and ']' in field :
-            fieldName, arrayIndex = field.split('[')
-            arrayIndex = int(arrayIndex.replace(']', ''))
-            if fieldName in currentValue and isinstance(currentValue[fieldName], list) and len(currentValue[fieldName]) > arrayIndex :
-                currentValue = currentValue[fieldName][arrayIndex]
-            else :
-                return False, None
-        elif field in currentValue :
-            currentValue = currentValue[field]
-        else :
+    for segment in fieldSpec.split('.') :
+        m = _JSON_PATH_SEGMENT.fullmatch(segment)
+        if segment == "" or m is None :
             return False, None
+        fieldName = m.group(1)
+        if fieldName != "" :
+            if not isinstance(currentValue, dict) or fieldName not in currentValue :
+                return False, None
+            currentValue = currentValue[fieldName]
+        for indexText in _JSON_PATH_INDEX.findall(m.group(2)) :
+            index = int(indexText)
+            if not isinstance(currentValue, list) or not (-len(currentValue) <= index < len(currentValue)) :
+                return False, None
+            currentValue = currentValue[index]
     return True, currentValue
 
 
