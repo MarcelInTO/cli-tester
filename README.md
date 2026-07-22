@@ -2,6 +2,10 @@
 
 A black-box test runner for command-line programs. Tests are plain Python scripts that import helper functions from the `wct` module and call them; the first failed check stops that test, but other tests still run.
 
+Don't let "CLI" undersell it: wct tests anything a command line can reach. Point it at your own binary and it's a CLI tester; point it at `curl` and it's an API tester; wrap any client that talks to a server, a database, or a device, and wct black-box tests the thing on the far side. If a command can exercise it — and the outcome shows up in exit codes, output, or files — wct can assert on it.
+
+wct is fully supported on Linux, macOS, and Windows: its own meta-test suite runs on all three platforms in CI on every change.
+
 ## Install
 
 WCT requires Python 3.10 or later. The recommended installer is [uv](https://docs.astral.sh/uv/), which manages its own Python — you don't need to install one separately.
