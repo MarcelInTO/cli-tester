@@ -58,3 +58,7 @@ The version string lives in **two** places that must move together on every bump
 2. The `@vX.Y.Z` install pins in `README.md` — currently three: the HTTPS example, the SSH example, and the CI-snippet `uv tool install` line.
 
 The README pins point consumers at a real published tag, so they lag by design: bump them to the tag you are about to cut. Before committing a release, `grep -n '@v[0-9]' README.md` and confirm every hit matches the new version — the 1.4.0 bump missed this and shipped a README pointing at the superseded 1.3.0 tag. Then tag `vX.Y.Z`, push the tag, and cut the matching GitLab release.
+
+## Mirroring
+
+The repo is push-mirrored from studio.wevr.com (the source of truth) to a public GitHub copy at `github.com/MarcelInTO/cli-tester`. Never push to GitHub directly — the mirror overwrites divergent refs. Branch and tag changes, including deletions, propagate automatically; syncs are batched at roughly one per five minutes, so back-to-back changes may take an extra cycle. GitLab release objects do not propagate — GitHub shows tags only.
