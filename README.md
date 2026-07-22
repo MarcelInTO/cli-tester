@@ -11,33 +11,33 @@ WCT requires Python 3.10 or later. The recommended installer is [uv](https://doc
 ### From a local clone
 
 ```sh
-git clone <repository-url>
+git clone https://github.com/MarcelInTO/cli-tester.git
 uv tool install --editable cli-tester
 ```
 
 ### Directly from the git URL
 
-Useful for consumers (CI jobs, other tools) that don't want a local checkout. The project is public on studio.wevr.com, so no authentication is required for read access.
+Useful for consumers (CI jobs, other tools) that don't want a local checkout. The project is public on GitHub, so no authentication is required for read access.
 
 For HTTPS (works anywhere, including CI jobs without any token setup):
 
 ```sh
-uv tool install "git+https://studio.wevr.com/wevr-public/cli-tester.git@v1.4.0"
+uv tool install "git+https://github.com/MarcelInTO/cli-tester.git@v1.4.0"
 ```
 
-For workstations that already have SSH set up to studio.wevr.com:
+For workstations that already have SSH set up to github.com:
 
 ```sh
-uv tool install "git+ssh://git@studio.wevr.com/wevr-public/cli-tester.git@v1.4.0"
+uv tool install "git+ssh://git@github.com/MarcelInTO/cli-tester.git@v1.4.0"
 ```
 
-A full CI snippet for another project on this GitLab instance:
+A full CI snippet for a project using GitLab CI:
 
 ```yaml
 test:
   image: ghcr.io/astral-sh/uv:python3.10-bookworm-slim
   script:
-    - uv tool install "git+https://studio.wevr.com/wevr-public/cli-tester.git@v1.4.0"
+    - uv tool install "git+https://github.com/MarcelInTO/cli-tester.git@v1.4.0"
     - export PATH="$HOME/.local/bin:$PATH"
     - wct --junit junit.xml 'tests/test_*.py'
   artifacts:
