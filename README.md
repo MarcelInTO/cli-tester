@@ -324,7 +324,7 @@ The final line is `N/M passed[, X failed][, Y errored][, Z xfailed][, W xpassed]
 
 ## Continuous integration
 
-WCT emits a JUnit XML report via `--junit FILE`. Most CI systems consume JUnit XML; the example below is for GitLab, but the same pattern (install wct, run with `--junit`, hand the file to the CI's test reporter) works on GitHub Actions, Jenkins, CircleCI, and others.
+WCT emits a JUnit XML report via `--junit FILE`. Most CI systems consume JUnit XML; the example below is for GitLab, but the same pattern (install wct, run with `--junit`, hand the file to the CI's test reporter) works on GitHub Actions, Jenkins, CircleCI, and others. For a live GitHub Actions example, see [`.github/workflows/ci.yml`](.github/workflows/ci.yml) in this repository — it runs wct's own meta-test suite across Linux, macOS, and Windows.
 
 ```yaml
 # .gitlab-ci.yml

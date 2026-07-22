@@ -1,0 +1,31 @@
+# Runs the wct meta-test suite across Linux, macOS, and Windows — the
+# GitHub Actions twin of .gitlab-ci.yml, and a working example of running
+# wct in an Action. This repo is a push mirror of studio.wevr.com (the
+# source of truth); the workflow triggers only on main and tags because
+# GitLab CI already covers topic branches upstream.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      # `uv sync` creates a .venv with the project's dependencies and wct
+      # itself (from pyproject.toml); `uv run` executes wct inside it.
+      - run: uv sync
+      - run: uv run wct --junit junit-${{ runner.os }}.xml 'tests/test_*.py'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: junit-${{ runner.os }}
+          path: junit-*.xml
