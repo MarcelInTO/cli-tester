@@ -194,6 +194,13 @@ def _isInteger(n) -> bool :
     return isinstance(n, int) and not isinstance(n, bool)
 
 
+def _isPositiveNumber(n) -> bool :
+    # Accept int or float seconds. Exclude bool (a bool is an int subclass) and
+    # require strictly positive — a zero or negative timeout would kill the
+    # command instantly, which is never what a test author means.
+    return isinstance(n, (int, float)) and not isinstance(n, bool) and n > 0
+
+
 ##############################################################################
 # Internal regex matching helpers
 ##############################################################################
@@ -225,6 +232,25 @@ def _matchOne(patternList, theString) -> tuple[bool, str] :
 
 
 ##############################################################################
+# Suite-wide command timeout default
+##############################################################################
+
+# Default per-command timeout (seconds) applied to every checkRunCommand when
+# the descriptor does not set its own 'timeout'. None means "no timeout" — the
+# historical behavior. The runner sets this once from the --timeout CLI flag
+# before the test loop; it deliberately persists across tests (it is a
+# suite-wide default, not per-test state) so there is no reset hook.
+_g_defaultTimeout = None
+
+
+def _setDefaultTimeout(seconds) :
+    """Set the suite-wide default command timeout. Called by the runner from
+    the --timeout CLI flag. Not part of the test-facing API."""
+    global _g_defaultTimeout
+    _g_defaultTimeout = seconds
+
+
+##############################################################################
 # Internal command-descriptor validation
 ##############################################################################
 
@@ -238,6 +264,7 @@ def _endTest() :
 # non-empty.
 _DESCRIPTOR_VALIDATORS = {
     "cmd":                   (_isListOfStrings,    "a non-empty list of strings"),
+    "timeout":               (_isPositiveNumber,   "a positive number of seconds"),
     "expect_stdout":         (_isStringOrList,     "a non-empty string or list of strings"),
     "dontexpect_stdout":     (_isStringOrList,     "a non-empty string or list of strings"),
     "expect_stderr":         (_isStringOrList,     "a non-empty string or list of strings"),
@@ -410,7 +437,23 @@ def checkRunCommand(testvals: dict, useShell: bool = False) -> tuple[int, str, s
     # caller wants. Join to a string so shell features like pipes and
     # redirects work as expected.
     cmdToRun = " ".join(testvals["cmd"]) if useShell else testvals["cmd"]
-    result = subprocess.run(cmdToRun, capture_output=True, shell=useShell)
+
+    # Resolve the effective timeout: a per-command 'timeout' wins over the
+    # suite-wide default set from --timeout; None means wait forever (the
+    # historical behavior). A hung command otherwise stalls the whole suite,
+    # which is especially costly on CI.
+    effectiveTimeout = testvals["timeout"] if entryExists("timeout") else _g_defaultTimeout
+    try :
+        result = subprocess.run(cmdToRun, capture_output=True, shell=useShell,
+                                timeout=effectiveTimeout)
+    except subprocess.TimeoutExpired :
+        # subprocess.run kills the direct child before re-raising. With
+        # shell=True a pipeline's grandchildren can outlive the shell — that
+        # narrower case is a documented subprocess limitation we don't paper
+        # over here.
+        firstFailFunc()
+        print(f"{_doIndentString()}        {Fore.RED}BAD:  timed out after {effectiveTimeout}s{Style.RESET_ALL}")
+        _endTest()
 
     stdoutText = result.stdout.decode('utf-8')
     stderrText = result.stderr.decode('utf-8')

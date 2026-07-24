@@ -85,13 +85,14 @@ wct 'tests/test_*.py'
 
 ```
 wct <test_path_or_glob> [<test_path_or_glob> ...]
-    [-p PATH] [-v] [--junit FILE] [--setup PATH] [--teardown PATH]
+    [-p PATH] [-v] [--timeout SECONDS] [--junit FILE] [--setup PATH] [--teardown PATH]
 ```
 
 - Multiple paths or globs can be listed on one command line.
 - `**` in a glob matches arbitrary subdirectories (rails/golang style). Quote your globs so wct expands them, not your shell.
 - `-p PATH` prepends to `$PATH` when running the executables under test — handy when testing a locally-built binary that isn't installed yet.
 - `-v` prints additional configuration and progress output.
+- `--timeout SECONDS` sets a default per-command timeout for every `checkRunCommand`. A command that runs longer is killed and its check fails, instead of a hung program stalling the whole suite (especially useful on CI). Individual commands override it with the descriptor `timeout` key. Without the flag there is no timeout — commands run to completion as before.
 - `--junit FILE` writes a JUnit XML report on completion; see [Continuous integration](#continuous-integration).
 - `--setup PATH` / `--teardown PATH` run a script once before / after the suite; see [Suite-level setup and teardown](#suite-level-setup-and-teardown).
 
@@ -361,6 +362,7 @@ When `--setup` or `--teardown` are used, the JUnit report includes synthetic tes
 | Key | Type | Meaning |
 |---|---|---|
 | `cmd` | `list[str]` | Command and arguments. For `checkRunShellCommand`, the list is joined with spaces and passed to the shell. |
+| `timeout` | `int` or `float` | Kill the command and fail the check if it runs longer than this many seconds. Overrides the suite-wide `--timeout`. Omit for no timeout (the default). |
 | `expect_returncode` | `int` | Process must exit with this code. |
 | `dontexpect_returncode` | `int` | Process must NOT exit with this code. |
 | `expect_stdout` | `str` or `list[str]` | Regex(es) that must all match stdout. |

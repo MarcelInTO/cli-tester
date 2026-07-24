@@ -25,8 +25,21 @@ from . import (
     _resetIndentLevel,
     _resetScopeState,
     _resetXfailState,
+    _setDefaultTimeout,
 )
 from ._workspace import getRunRoot, getStateFilePath, resetRunRoot
+
+
+def _positiveFloat(value) :
+    """argparse type for --timeout: a strictly-positive number of seconds.
+    A zero or negative timeout would kill every command instantly."""
+    try :
+        seconds = float(value)
+    except ValueError :
+        raise argparse.ArgumentTypeError(f"invalid float value: {value!r}")
+    if seconds <= 0 :
+        raise argparse.ArgumentTypeError("must be a positive number of seconds")
+    return seconds
 
 
 def _parseArgs() :
@@ -41,6 +54,10 @@ def _parseArgs() :
                         help='path to prepend to PATH when searching for executables')
     parser.add_argument('-v', '--verbose', action='store_true',
                         help='show more status messages while executing')
+    parser.add_argument('--timeout', type=_positiveFloat, metavar='SECONDS',
+                        help='default per-command timeout in seconds; a hung command '
+                             'is killed and its check fails instead of stalling the '
+                             'suite. A command can override via the descriptor "timeout" key.')
     parser.add_argument('--junit', type=str, metavar='FILE',
                         help='write a JUnit XML report to FILE on completion')
     parser.add_argument('--setup', type=str, metavar='PATH',
@@ -258,12 +275,18 @@ def main() -> int :
     if args.path :
         os.environ["PATH"] = args.path + os.pathsep + os.environ.get("PATH", "")
 
+    # Applies to every checkRunCommand that doesn't set its own 'timeout'.
+    # None (no flag) preserves the historical wait-forever behavior.
+    _setDefaultTimeout(args.timeout)
+
     if args.verbose :
         print("Configuration:")
         print(f"    workroot: {getRunRoot()}")
         print(f"    testnames: {args.testname}")
         if args.path :
             print(f"    path prepend: {args.path}")
+        if args.timeout :
+            print(f"    default timeout: {args.timeout}s")
         if args.junit :
             print(f"    junit output: {args.junit}")
         if args.setup :
