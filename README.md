@@ -24,13 +24,13 @@ Useful for consumers (CI jobs, other tools) that don't want a local checkout. Th
 For HTTPS (works anywhere, including CI jobs without any token setup):
 
 ```sh
-uv tool install "git+https://github.com/MarcelInTO/cli-tester.git@v1.5.0"
+uv tool install "git+https://github.com/MarcelInTO/cli-tester.git@v1.6.0"
 ```
 
 For workstations that already have SSH set up to github.com:
 
 ```sh
-uv tool install "git+ssh://git@github.com/MarcelInTO/cli-tester.git@v1.5.0"
+uv tool install "git+ssh://git@github.com/MarcelInTO/cli-tester.git@v1.6.0"
 ```
 
 A full CI snippet for a project using GitLab CI:
@@ -39,7 +39,7 @@ A full CI snippet for a project using GitLab CI:
 test:
   image: ghcr.io/astral-sh/uv:python3.10-bookworm-slim
   script:
-    - uv tool install "git+https://github.com/MarcelInTO/cli-tester.git@v1.5.0"
+    - uv tool install "git+https://github.com/MarcelInTO/cli-tester.git@v1.6.0"
     - export PATH="$HOME/.local/bin:$PATH"
     - wct --junit junit.xml 'tests/test_*.py'
   artifacts:
@@ -333,7 +333,7 @@ stages:
 test:
   stage: test
   script:
-    - uv tool install "git+https://github.com/MarcelInTO/cli-tester.git@v1.5.0"
+    - uv tool install "git+https://github.com/MarcelInTO/cli-tester.git@v1.6.0"
     - export PATH="$HOME/.local/bin:$PATH"
     - wct --junit junit.xml 'tests/test_*.py'
   artifacts:
