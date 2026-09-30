@@ -8,6 +8,7 @@ import atexit
 import os
 import shutil
 import stat
+import time
 
 from pathlib import Path
 from platformdirs import user_cache_dir
@@ -39,10 +40,28 @@ def _stepOutOfWorkspace() :
         pass
 
 
+def _rmtreeWithRetry(path) :
+    # On Windows a process that has just been killed can keep its cwd (and
+    # open files) in use for a moment while its termination completes, and
+    # Windows refuses to delete a directory in use. That is the normal case
+    # for the child of a background command stopped at the end of a test or
+    # of the run: taskkill returns before the child is fully gone. Retry
+    # briefly rather than let it abort the whole run.
+    deadline = time.monotonic() + 3
+    while True :
+        try :
+            shutil.rmtree(path, onerror=_onDeleteRw)
+            return
+        except OSError :
+            if time.monotonic() >= deadline :
+                raise
+            time.sleep(0.1)
+
+
 def _cleanupPerRunBase() :
     if _perRunBase.exists() :
         _stepOutOfWorkspace()
-        shutil.rmtree(_perRunBase, onerror=_onDeleteRw)
+        _rmtreeWithRetry(_perRunBase)
 
 
 atexit.register(_cleanupPerRunBase)
@@ -70,7 +89,7 @@ def resetRunRoot() -> Path :
     _stepOutOfWorkspace()
     if root.exists() :
         if root.is_dir() :
-            shutil.rmtree(root, onerror=_onDeleteRw)
+            _rmtreeWithRetry(root)
         else :
             raise RuntimeError(f"'{root}' exists but is not a directory")
     root.mkdir(parents=True, exist_ok=True)
