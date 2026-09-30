@@ -413,8 +413,10 @@ def main() -> int :
                     status = "errored"
                     message = "setup-each failed; test did not run"
                     print(f"        {Fore.RED}{message}{Style.RESET_ALL}")
+                    # On its own line: JUnit shows an error's first line as
+                    # its summary, and the hook's may be a traceback.
                     if hookMessage :
-                        message += f": {hookMessage}"
+                        message += f"\n{hookMessage}"
 
             if status == "passed" :
                 status, message = _runGuarded(absTest, "test")
