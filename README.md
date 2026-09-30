@@ -440,6 +440,24 @@ rc, after, err = checkRunCommand({"cmd": ["./mytool", "count"], "expect_returnco
 checkEqual(int(after), int(before) + 1, "add increments the count")
 ```
 
+### Retrying
+
+- **`retryUntilPass(fn, timeout, interval=1.0)`** — call `fn` (no arguments) until it returns without a failed check, or until `timeout` seconds have passed; returns what `fn` returned. Waits `interval` seconds between attempts.
+
+For checks that pass only once the system under test settles, such as a command that flaps while a service registers, or polling until a value reaches its target:
+
+```python
+from wct import checkEqual, checkRunCommand, retryUntilPass
+
+rc, out, err = retryUntilPass(
+    lambda: checkRunCommand({"cmd": ["./mytool", "show", "status"], "expect_returncode": 0}),
+    timeout=30)
+
+retryUntilPass(lambda: checkEqual(currentEta(), 0, "ETA is zero"), timeout=60, interval=5)
+```
+
+The output of failed attempts is suppressed. A pass on the first attempt looks exactly like calling `fn` directly; a later pass is preceded by `Retry: passed on attempt N`. If no attempt passes, `Retry: gave up after N attempts` is followed by the last attempt's output, and that attempt's failure fails the test. Only a failed check is retried: any other exception from `fn` propagates at once, as a broken test. Sections and variants opened by a failed attempt are rolled back, so a section inside `fn` is reported once.
+
 ### Test flow
 
 - **`failTest(message)`** — fail the current test with `message`. Does not return.

@@ -4,6 +4,8 @@
 # Please follow the established pattern and keep the imports
 # alphabetized (logically, not pedantically)
 
+import contextlib
+import io
 import json
 import os
 import platform
@@ -152,6 +154,34 @@ def _getXfailState() :
         "blocks": list(_g_xfailBlocks),
         "wholeTestReason": _g_xfailWholeTestReason,
     }
+
+
+##############################################################################
+# Internal snapshot of per-test bookkeeping (for retryUntilPass)
+##############################################################################
+
+# A failed retryUntilPass attempt may have opened scopes, closed some, bumped
+# the indent or recorded xfail blocks. Rolling that back before the next
+# attempt keeps a section inside the retried function from nesting inside
+# itself ("probe / probe") or being counted once per attempt.
+
+def _snapshotTestState() :
+    return {
+        "indentLevel": _g_indentLevel,
+        "scopeStack": list(_g_scopeStack),
+        "scopeResultCount": len(_g_scopeResults),
+        "xfailBlockCount": len(_g_xfailBlocks),
+        "xfailWholeTestReason": _g_xfailWholeTestReason,
+    }
+
+
+def _restoreTestState(snapshot) :
+    global _g_indentLevel, _g_xfailWholeTestReason
+    _g_indentLevel = snapshot["indentLevel"]
+    _g_scopeStack[:] = snapshot["scopeStack"]
+    del _g_scopeResults[snapshot["scopeResultCount"]:]
+    del _g_xfailBlocks[snapshot["xfailBlockCount"]:]
+    _g_xfailWholeTestReason = snapshot["xfailWholeTestReason"]
 
 
 ##############################################################################
@@ -693,6 +723,60 @@ def checkFileReadOnly(fn: str) :
         passTest(f"File read only - '{fn}'")
     else :
         failTest(f"File writeable - '{fn}'")
+
+
+def retryUntilPass(fn, timeout, interval: float = 1.0) :
+    """Call fn (with no arguments) until it returns without a failed check, or
+    until timeout seconds have passed, and return what fn returned. For checks
+    that pass only once the system under test settles, such as a command that
+    flaps while a service registers.
+
+    Output of failed attempts is suppressed. A pass on the first attempt looks
+    exactly like calling fn directly; a later pass also notes the attempt
+    count. When no attempt passes, the last attempt's output is shown and its
+    failure fails the test. Waits interval seconds between attempts and starts
+    none after the timeout. Only a failed check is retried: any other
+    exception propagates at once, as a broken test rather than a flap."""
+    if not _isPositiveNumber(timeout) :
+        failTest("retryUntilPass: timeout must be a positive number of seconds")
+    if isinstance(interval, bool) or not isinstance(interval, (int, float)) or interval < 0 :
+        failTest("retryUntilPass: interval must be a non-negative number of seconds")
+
+    noteIndent = _doIndentString()
+    startTime = time.monotonic()
+    deadline = startTime + timeout
+    attempt = 0
+    while True :
+        attempt += 1
+        snapshot = _snapshotTestState()
+        captured = io.StringIO()
+        try :
+            with contextlib.redirect_stdout(captured) :
+                result = fn()
+        except TestFailed as e :
+            failure = e
+        except BaseException :
+            # Not a flap: show what the attempt printed and let it propagate.
+            print(captured.getvalue(), end="")
+            raise
+        else :
+            if attempt > 1 :
+                print(f"{noteIndent}    {Fore.YELLOW}Retry: passed on attempt {attempt} "
+                      f"after {time.monotonic() - startTime:.1f}s{Style.RESET_ALL}")
+            print(captured.getvalue(), end="")
+            return result
+
+        if time.monotonic() + interval >= deadline :
+            break
+        _restoreTestState(snapshot)
+        time.sleep(interval)
+
+    # The last attempt's state is left as it failed, so that, as for a direct
+    # call, the runner attributes the failure to any scope it left open.
+    print(f"{noteIndent}    {Fore.YELLOW}Retry: gave up after {attempt} attempts over "
+          f"{time.monotonic() - startTime:.1f}s; last attempt:{Style.RESET_ALL}")
+    print(captured.getvalue(), end="")
+    raise failure
 
 
 class expectFail :
