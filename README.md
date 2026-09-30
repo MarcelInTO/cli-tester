@@ -404,6 +404,22 @@ value itself, which is how you assert on the bare array as a whole:
 - **`checkFileWriteable(path)`** — file must be writable by the current user.
 - **`checkFileReadOnly(path)`** — file must not be writable by the current user.
 
+### Checks on Python values
+
+For conditions a test computes itself, such as values combined from several commands' output, so that a passing check still prints a `PASS` line:
+
+- **`checkTrue(condition, message)`** — pass if `condition` is truthy, otherwise fail the test. Either way `message` is printed.
+- **`checkEqual(actual, expected, message)`** — pass if `actual == expected`. On failure both values are shown: `FAIL: (ETA is zero [got 5, expected 0])`.
+
+```python
+from wct import checkEqual, checkRunCommand
+
+rc, before, err = checkRunCommand({"cmd": ["./mytool", "count"], "expect_returncode": 0})
+checkRunCommand({"cmd": ["./mytool", "add", "item"], "expect_returncode": 0})
+rc, after, err = checkRunCommand({"cmd": ["./mytool", "count"], "expect_returncode": 0})
+checkEqual(int(after), int(before) + 1, "add increments the count")
+```
+
 ### Test flow
 
 - **`failTest(message)`** — fail the current test with `message`. Does not return.

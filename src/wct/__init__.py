@@ -404,6 +404,26 @@ def passTest(message: str) :
     print(f"{_doIndentString()}    {Fore.GREEN}PASS: ({message}){Style.RESET_ALL}")
 
 
+def checkTrue(condition, message: str) :
+    """Assert a condition computed in Python. Prints a PASS line with the
+    message when the condition is truthy; otherwise fails the test with it.
+    Use for custom checks that no check* function covers, so that a passing
+    result still shows up in the report."""
+    if condition :
+        passTest(message)
+    else :
+        failTest(message)
+
+
+def checkEqual(actual, expected, message: str) :
+    """Assert that a value computed in Python equals the expected one. Like
+    checkTrue, but a failure also shows both values."""
+    if actual == expected :
+        passTest(message)
+    else :
+        failTest(f"{message} [got {actual!r}, expected {expected!r}]")
+
+
 def checkRunCommand(testvals: dict, useShell: bool = False) -> tuple[int, str, str] :
     firstfail = True
     def firstFailFunc() :
