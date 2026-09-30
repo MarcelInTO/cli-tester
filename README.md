@@ -499,7 +499,7 @@ rc, out, err = retryUntilPass(
 retryUntilPass(lambda: checkEqual(currentEta(), 0, "ETA is zero"), timeout=60, interval=5)
 ```
 
-The output of failed attempts is suppressed. A pass on the first attempt looks exactly like calling `fn` directly; a later pass is preceded by `Retry: passed on attempt N`. If no attempt passes, `Retry: gave up after N attempts` is followed by the last attempt's output, and that attempt's failure fails the test. Only a failed check is retried: any other exception from `fn` propagates at once, as a broken test. Sections and variants opened by a failed attempt are rolled back, so a section inside `fn` is reported once.
+The output of failed attempts is suppressed. A pass on the first attempt looks exactly like calling `fn` directly; a later pass is preceded by `Retry: passed on attempt N`. If no attempt passes, `Retry: gave up after N attempts` is followed by the last attempt's output, and that attempt's failure fails the test. Only a failed check is retried: any other exception from `fn` propagates at once, as a broken test. A failed attempt is rolled back: sections and variants it opened are discarded, so a section inside `fn` is reported once, and [background commands](#background-commands) it started are stopped.
 
 ### Test flow
 
