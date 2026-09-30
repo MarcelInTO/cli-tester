@@ -201,6 +201,22 @@ def _isPositiveNumber(n) -> bool :
     return isinstance(n, (int, float)) and not isinstance(n, bool) and n > 0
 
 
+def _isEnvDict(v) -> bool :
+    # Variable names map to a string value, or to None to remove the variable.
+    if not isinstance(v, dict) :
+        return False
+    for name, value in v.items() :
+        if not _isString(name) or name == "" :
+            return False
+        if value is not None and not _isString(value) :
+            return False
+    return True
+
+
+def _isStringOrBytes(v) -> bool :
+    return isinstance(v, (str, bytes))
+
+
 ##############################################################################
 # Internal regex matching helpers
 ##############################################################################
@@ -261,10 +277,12 @@ def _endTest() :
 # Table of recognised keys in a checkRunCommand testvals dict. Each entry maps
 # the key name to (validator, human description). A None value for any key is
 # always accepted (treated as 'not set'). Length-having values must also be
-# non-empty.
+# non-empty, except for the keys in _DESCRIPTOR_EMPTY_OK.
 _DESCRIPTOR_VALIDATORS = {
     "cmd":                   (_isListOfStrings,    "a non-empty list of strings"),
     "timeout":               (_isPositiveNumber,   "a positive number of seconds"),
+    "env":                   (_isEnvDict,          "a dict mapping variable names to strings, or to None to remove them"),
+    "stdin":                 (_isStringOrBytes,    "a string or bytes"),
     "expect_stdout":         (_isStringOrList,     "a non-empty string or list of strings"),
     "dontexpect_stdout":     (_isStringOrList,     "a non-empty string or list of strings"),
     "expect_stderr":         (_isStringOrList,     "a non-empty string or list of strings"),
@@ -273,6 +291,12 @@ _DESCRIPTOR_VALIDATORS = {
     "dontexpect_returncode": (_isInteger,          "an integer"),
     "check_json_stdout":     (_isListOfJsonFields, "a non-empty list of JSON field tests"),
 }
+
+# An empty stdin is a meaningful input (the child sees EOF at once), and an
+# empty env is a harmless no-op that a test building its overrides
+# programmatically produces naturally, e.g. removing only those suite
+# variables that happen to be set.
+_DESCRIPTOR_EMPTY_OK = {"env", "stdin"}
 
 
 def _validateCommandStruct(v) -> bool :
@@ -289,10 +313,33 @@ def _validateCommandStruct(v) -> bool :
         if not check(val) :
             print(f"    WARN: '{key}' must be {desc}.")
             return False
-        if hasattr(val, '__len__') and len(val) == 0 :
+        if hasattr(val, '__len__') and len(val) == 0 and key not in _DESCRIPTOR_EMPTY_OK :
             print(f"    WARN: '{key}' must be {desc} (got empty).")
             return False
     return True
+
+
+def _childEnv(overrides) :
+    """The environment for a child process: the runner's own environment with
+    the descriptor's 'env' overrides merged over it, where a value of None
+    removes the variable. Returns None when there are no overrides, which
+    subprocess takes to mean 'inherit' — exactly the behavior without the key.
+    The runner's os.environ is never modified."""
+    if overrides is None :
+        return None
+    env = os.environ.copy()
+    for name, value in overrides.items() :
+        # Windows variable names are case-insensitive, and os.environ.copy()
+        # there yields upper-cased names. Match that, so that overriding or
+        # removing "Path" acts on the inherited "PATH" rather than adding a
+        # second, differently-cased entry.
+        if os.name == "nt" :
+            name = name.upper()
+        if value is None :
+            env.pop(name, None)
+        else :
+            env[name] = value
+    return env
 
 
 ##############################################################################
@@ -442,11 +489,18 @@ def checkRunCommand(testvals: dict, useShell: bool = False) -> tuple[int, str, s
         print("        invalid test command descriptor")
         _endTest()
 
+    childEnv = _childEnv(testvals.get("env"))
+
     # The executable might not be found and subprocess.run does not deal with
     # that gracefully. Skip the existence check in shell mode because cmd[0]
     # may legitimately contain shell syntax (pipelines, redirects, etc.)
-    # that shutil.which cannot resolve.
-    if not useShell and not shutil.which(testvals["cmd"][0]) :
+    # that shutil.which cannot resolve. Look where the launch will look:
+    # subprocess searches the child's PATH on POSIX, but CreateProcess on
+    # Windows searches the runner's own.
+    whichPath = None
+    if childEnv is not None and os.name != "nt" :
+        whichPath = childEnv.get("PATH", os.defpath)
+    if not useShell and not shutil.which(testvals["cmd"][0], path=whichPath) :
         firstFailFunc()
         print(f"{_doIndentString()}        {Fore.RED}BAD:  command not found '{testvals['cmd'][0]}'{Style.RESET_ALL}")
         _endTest()
@@ -463,9 +517,18 @@ def checkRunCommand(testvals: dict, useShell: bool = False) -> tuple[int, str, s
     # historical behavior). A hung command otherwise stalls the whole suite,
     # which is especially costly on CI.
     effectiveTimeout = testvals["timeout"] if entryExists("timeout") else _g_defaultTimeout
+
+    # 'stdin' is written to the child's stdin, which is then closed, so a
+    # child that reads to EOF finishes. Without the key the child inherits the
+    # runner's stdin, as it always has. Text goes as UTF-8, the encoding the
+    # child's output is decoded with.
+    stdinData = testvals.get("stdin")
+    if isinstance(stdinData, str) :
+        stdinData = stdinData.encode("utf-8")
+
     try :
         result = subprocess.run(cmdToRun, capture_output=True, shell=useShell,
-                                timeout=effectiveTimeout)
+                                timeout=effectiveTimeout, env=childEnv, input=stdinData)
     except subprocess.TimeoutExpired :
         # subprocess.run kills the direct child before re-raising. With
         # shell=True a pipeline's grandchildren can outlive the shell — that

@@ -363,6 +363,8 @@ When `--setup` or `--teardown` are used, the JUnit report includes synthetic tes
 |---|---|---|
 | `cmd` | `list[str]` | Command and arguments. For `checkRunShellCommand`, the list is joined with spaces and passed to the shell. |
 | `timeout` | `int` or `float` | Kill the command and fail the check if it runs longer than this many seconds. Overrides the suite-wide `--timeout`. Omit for no timeout (the default). |
+| `env` | `dict[str, str \| None]` | Environment overrides for this command only, merged over the inherited environment. A value of `None` removes that variable. See [Environment and stdin](#environment-and-stdin). |
+| `stdin` | `str` or `bytes` | Written to the command's stdin, which is then closed. A `str` is sent as UTF-8. Without it the command inherits wct's own stdin. |
 | `expect_returncode` | `int` | Process must exit with this code. |
 | `dontexpect_returncode` | `int` | Process must NOT exit with this code. |
 | `expect_stdout` | `str` or `list[str]` | Regex(es) that must all match stdout. |
@@ -370,6 +372,24 @@ When `--setup` or `--teardown` are used, the JUnit report includes synthetic tes
 | `expect_stderr` | `str` or `list[str]` | Regex(es) that must all match stderr. |
 | `dontexpect_stderr` | `str` or `list[str]` | Regex(es) that must NOT match stderr. |
 | `check_json_stdout` | `list[dict]` | JSON field assertions (see below). |
+
+#### Environment and stdin
+
+`env` changes the environment of one command without touching wct's own, so nothing carries over to the next command. It is merged over the inherited environment (including anything `-p` or a setup script's `exportEnv` added); a value of `None` removes a variable, and removing one that isn't set is not an error. `stdin` feeds the command input and then closes its stdin, so a command that reads to end-of-file finishes. Both work with `checkRunShellCommand` too.
+
+```python
+checkRunCommand({
+    "cmd": ["./mytool", "login", "--password-stdin"],
+    "stdin": "s3cret\n",
+    # Run as a plain login: drop the credentials the suite setup exported.
+    "env": {"MYTOOL_TOKEN": None, "MYTOOL_PROFILE": "ci"},
+    "expect_returncode": 0,
+})
+```
+
+wct never prints `env` or `stdin` values, so a password passed this way stays out of the test output.
+
+On POSIX, when `env` changes `PATH`, the command is looked up on the new `PATH`. On Windows the lookup always uses wct's own `PATH`, because that is where Windows itself looks when it starts the process.
 
 #### JSON field assertions
 
