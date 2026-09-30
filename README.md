@@ -86,6 +86,7 @@ wct 'tests/test_*.py'
 ```
 wct <test_path_or_glob> [<test_path_or_glob> ...]
     [-p PATH] [-v] [--timeout SECONDS] [--junit FILE] [--setup PATH] [--teardown PATH]
+    [--setup-each PATH] [--teardown-each PATH]
 ```
 
 - Multiple paths or globs can be listed on one command line.
@@ -95,6 +96,7 @@ wct <test_path_or_glob> [<test_path_or_glob> ...]
 - `--timeout SECONDS` sets a default per-command timeout for every `checkRunCommand`. A command that runs longer is killed and its check fails, instead of a hung program stalling the whole suite (especially useful on CI). Individual commands override it with the descriptor `timeout` key. Without the flag there is no timeout — commands run to completion as before.
 - `--junit FILE` writes a JUnit XML report on completion; see [Continuous integration](#continuous-integration).
 - `--setup PATH` / `--teardown PATH` run a script once before / after the suite; see [Suite-level setup and teardown](#suite-level-setup-and-teardown).
+- `--setup-each PATH` / `--teardown-each PATH` run a script before / after every test; see [Per-test setup and teardown](#per-test-setup-and-teardown).
 
 Each test runs in a clean workspace under `~/.cache/wct/`. The workspace is wiped between tests, so tests cannot rely on prior state.
 
@@ -199,6 +201,29 @@ checkRunShellCommand({
 
 The `cmd` list is joined with spaces and passed to the shell — there is no automatic quoting, so if you need a literal argument with spaces or special characters, quote it yourself within the list element.
 
+## Background commands
+
+Some tests need a long-running process beside them, such as a server that the CLI under test talks to. `startBackgroundCommand` starts one and returns straight away with a handle:
+
+```python
+from wct import checkRunCommand, startBackgroundCommand
+
+server = startBackgroundCommand({"cmd": ["./myserver", "--port", "0"]})
+port = int(server.waitForOutput(r"listening on port (\d+)").group(1))
+
+checkRunCommand({"cmd": ["./mytool", "--server", f"localhost:{port}", "ping"], "expect_returncode": 0})
+```
+
+- **You don't have to stop it.** When the test that started a background command ends, whether it passed, failed or errored, wct stops anything it left running. A failing test can't leave a server behind holding a port. A background command started by a `--setup` script lives for the whole run and is stopped after `--teardown`.
+- The descriptor takes `cmd` and `env`, as for `checkRunCommand`; pass `useShell=True` as the second argument to run it through the shell. Its stdin is empty, and its stdout and stderr are captured together.
+- `waitForOutput(pattern, timeout=30)` waits until the output matches the regex, prints a `PASS` line and returns the `re.Match`, so a value like a port can be read from a group. If the timeout passes, or the command exits, before a match, the test fails and the command's output is shown. Each successful wait consumes output up to the end of its match, and the next wait sees only what comes after it. After running a command, a wait for the log line it causes won't be fooled by an older copy of that line.
+- `stop(timeout=5)` stops the command and everything it started, and returns its exit code. On Linux and macOS, `SIGTERM` goes to the command and everything it started; once the command exits, or after `timeout` seconds, whatever is still running is killed. On Windows it is all killed at once.
+- `output()` returns everything captured so far; `isRunning()`, `returncode` and `pid` report on the process.
+
+A program writing to a pipe often holds its output in a buffer until the buffer fills. If `waitForOutput` times out on a line you know the command printed, make the command flush its output. For a Python program, use `print(..., flush=True)`, or set `PYTHONUNBUFFERED=1` in `env`.
+
+What stopping can't reach: a process that detaches into a session or process group of its own (a daemon) escapes the stop, and on Windows, once the command itself has exited, the processes it started are no longer tracked. A hard kill of wct (`kill -9`, `taskkill /F`) leaves background commands running.
+
 ## Suite-level setup and teardown
 
 For tests that share an expensive precondition — booting a server, provisioning a transient database schema — wct can run a setup script once before the suite and a teardown script once after.
@@ -234,7 +259,7 @@ schema = getState("schema")
 
 - If setup fails, tests do not run. Teardown still runs, against whatever state setup recorded before failing.
 - If teardown fails, the exit code becomes `1` and the teardown failure is reported on its own line so it doesn't get conflated with the test counts.
-- `Ctrl-C` during the test phase stops new tests from starting, runs teardown, and exits non-zero. A second `Ctrl-C` skips teardown.
+- `Ctrl-C` during the test phase stops new tests from starting, runs teardown, and exits non-zero. A second `Ctrl-C` skips teardown, but still kills any [background commands](#background-commands).
 
 **Teardown must tolerate missing state** because of partial-setup failures — if setup boots one server, records its PID, and then fails on a second server, teardown still needs to clean up the first one. `getState` returns `None` (or the supplied default) when a key was never set, and the natural idiom uses null-checks:
 
@@ -257,6 +282,23 @@ if (pid := getState("server2_pid")):
 ```
 
 If setup fails after booting server 1 but before recording `server2_pid`, teardown still cleans up server 1.
+
+## Per-test setup and teardown
+
+When every test needs the same fixture set up and removed around it, such as loading a data set into the service under test and deleting it afterwards, put those steps in scripts and let wct run them around each test instead of repeating them in every file:
+
+```sh
+wct --setup-each load_fixture.py --teardown-each delete_fixture.py 'tests/test_*.py'
+```
+
+- Both scripts run in the test's own fresh workspace, so a file setup-each writes to its cwd is there for the test. Teardown-each runs in the workspace too, wherever the test left the cwd. (Suite-level `--setup` / `--teardown` run in the directory you invoked wct from instead.)
+- They are ordinary wct scripts: `checkRunCommand` and the other checks work, and their output appears nested under a `Running setup-each` / `Running teardown-each` header inside each test's output.
+- If setup-each fails, the test does not run and is reported as errored, with the message `setup-each failed; test did not run`.
+- Teardown-each always runs, even when setup-each or the test failed, so it must tolerate a fixture that was never fully created.
+- A failed teardown-each is reported as a testcase of its own, `<test>::__teardown_each__`, rather than marking the test failed. It counts in the summary as one more failed testcase.
+- Background commands started by either script belong to the test: they keep running through the test and teardown-each, and are stopped after it.
+
+Setup-each and the test run in the same process, so setup-each can hand the test a value through `exportEnv` (it runs again before the next test, overwriting the value) or `setState` / `getState`.
 
 ## Marking known-broken cases (xfail)
 
@@ -356,6 +398,7 @@ When `--setup` or `--teardown` are used, the JUnit report includes synthetic tes
 
 - **`checkRunCommand(testvals)`** — run a process and assert on its output.
 - **`checkRunShellCommand(testvals)`** — same, but the command runs via the shell (so pipes, redirects, glob expansion, etc. work).
+- **`startBackgroundCommand(testvals, useShell=False)`** — start a long-running command and return a handle with `waitForOutput(pattern, timeout=30)`, `stop(timeout=5)`, `output()`, `isRunning()`, `returncode` and `pid`. `testvals` takes only `cmd` and `env`. Stopped automatically when the test that started it ends. See [Background commands](#background-commands).
 
 `testvals` is a dict with the following keys (all optional except `cmd`):
 
@@ -363,6 +406,8 @@ When `--setup` or `--teardown` are used, the JUnit report includes synthetic tes
 |---|---|---|
 | `cmd` | `list[str]` | Command and arguments. For `checkRunShellCommand`, the list is joined with spaces and passed to the shell. |
 | `timeout` | `int` or `float` | Kill the command and fail the check if it runs longer than this many seconds. Overrides the suite-wide `--timeout`. Omit for no timeout (the default). |
+| `env` | `dict[str, str \| None]` | Environment overrides for this command only, merged over the inherited environment. A value of `None` removes that variable. See [Environment and stdin](#environment-and-stdin). |
+| `stdin` | `str` or `bytes` | Written to the command's stdin, which is then closed. A `str` is sent as UTF-8. Without it the command inherits wct's own stdin. |
 | `expect_returncode` | `int` | Process must exit with this code. |
 | `dontexpect_returncode` | `int` | Process must NOT exit with this code. |
 | `expect_stdout` | `str` or `list[str]` | Regex(es) that must all match stdout. |
@@ -370,6 +415,24 @@ When `--setup` or `--teardown` are used, the JUnit report includes synthetic tes
 | `expect_stderr` | `str` or `list[str]` | Regex(es) that must all match stderr. |
 | `dontexpect_stderr` | `str` or `list[str]` | Regex(es) that must NOT match stderr. |
 | `check_json_stdout` | `list[dict]` | JSON field assertions (see below). |
+
+#### Environment and stdin
+
+`env` changes the environment of one command without touching wct's own, so nothing carries over to the next command. It is merged over the inherited environment (including anything `-p` or a setup script's `exportEnv` added); a value of `None` removes a variable, and removing one that isn't set is not an error. `stdin` feeds the command input and then closes its stdin, so a command that reads to end-of-file finishes. Both work with `checkRunShellCommand` too.
+
+```python
+checkRunCommand({
+    "cmd": ["./mytool", "login", "--password-stdin"],
+    "stdin": "s3cret\n",
+    # Run as a plain login: drop the credentials the suite setup exported.
+    "env": {"MYTOOL_TOKEN": None, "MYTOOL_PROFILE": "ci"},
+    "expect_returncode": 0,
+})
+```
+
+wct never prints `env` or `stdin` values, so a password passed this way stays out of the test output.
+
+On POSIX, when `env` changes `PATH`, the command is looked up on the new `PATH`. On Windows the lookup always uses wct's own `PATH`, because that is where Windows itself looks when it starts the process.
 
 #### JSON field assertions
 
@@ -403,6 +466,40 @@ value itself, which is how you assert on the bare array as a whole:
 - **`checkPathNotExists(path)`** — path must not exist.
 - **`checkFileWriteable(path)`** — file must be writable by the current user.
 - **`checkFileReadOnly(path)`** — file must not be writable by the current user.
+
+### Checks on Python values
+
+For conditions a test computes itself, such as values combined from several commands' output, so that a passing check still prints a `PASS` line:
+
+- **`checkTrue(condition, message)`** — pass if `condition` is truthy, otherwise fail the test. Either way `message` is printed.
+- **`checkEqual(actual, expected, message)`** — pass if `actual == expected`. On failure both values are shown: `FAIL: (ETA is zero [got 5, expected 0])`.
+
+```python
+from wct import checkEqual, checkRunCommand
+
+rc, before, err = checkRunCommand({"cmd": ["./mytool", "count"], "expect_returncode": 0})
+checkRunCommand({"cmd": ["./mytool", "add", "item"], "expect_returncode": 0})
+rc, after, err = checkRunCommand({"cmd": ["./mytool", "count"], "expect_returncode": 0})
+checkEqual(int(after), int(before) + 1, "add increments the count")
+```
+
+### Retrying
+
+- **`retryUntilPass(fn, timeout, interval=1.0)`** — call `fn` (no arguments) until it returns without a failed check, or until `timeout` seconds have passed; returns what `fn` returned. Waits `interval` seconds between attempts.
+
+For checks that pass only once the system under test settles, such as a command that flaps while a service registers, or polling until a value reaches its target:
+
+```python
+from wct import checkEqual, checkRunCommand, retryUntilPass
+
+rc, out, err = retryUntilPass(
+    lambda: checkRunCommand({"cmd": ["./mytool", "show", "status"], "expect_returncode": 0}),
+    timeout=30)
+
+retryUntilPass(lambda: checkEqual(currentEta(), 0, "ETA is zero"), timeout=60, interval=5)
+```
+
+The output of failed attempts is suppressed. A pass on the first attempt looks exactly like calling `fn` directly; a later pass is preceded by `Retry: passed on attempt N`. If no attempt passes, `Retry: gave up after N attempts` is followed by the last attempt's output, and that attempt's failure fails the test. Only a failed check is retried: any other exception from `fn` propagates at once, as a broken test. A failed attempt is rolled back: sections and variants it opened are discarded, so a section inside `fn` is reported once, and [background commands](#background-commands) it started are stopped.
 
 ### Test flow
 

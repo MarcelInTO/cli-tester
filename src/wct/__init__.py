@@ -4,14 +4,20 @@
 # Please follow the established pattern and keep the imports
 # alphabetized (logically, not pedantically)
 
+import atexit
+import codecs
+import contextlib
+import io
 import json
 import os
 import platform
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import textwrap
+import threading
 import time
 
 from colorama import Fore, Style, init as _colorama_init
@@ -44,11 +50,12 @@ def _doIndentString() -> str :
     return "    " * _g_indentLevel
 
 
-def _resetIndentLevel() :
+def _resetIndentLevel(level: int = 1) :
     """Reset indent state between tests. Called by the runner; not part of the
-    test-facing API."""
+    test-facing API. The runner passes a deeper level to nest a per-test
+    hook's output under its header."""
     global _g_indentLevel
-    _g_indentLevel = 1
+    _g_indentLevel = level
 
 
 ##############################################################################
@@ -155,6 +162,89 @@ def _getXfailState() :
 
 
 ##############################################################################
+# Internal background-command registry
+##############################################################################
+
+# Every BackgroundCommand not yet stopped is listed here, tagged with its
+# owner: "test" when a test (or a per-test hook) started it, "suite" when a
+# --setup or --teardown script did. The runner stops a test's commands when
+# that test ends and the suite's after teardown, so a test that fails or
+# errors before stopping its server cannot leave it running, holding a port.
+_g_backgroundCommands = []
+_g_backgroundOwner = "test"
+
+
+def _setBackgroundOwner(owner: str) :
+    """Set the owner recorded for commands started from now on: "suite"
+    around setup and teardown, "test" around tests. Called by the runner."""
+    global _g_backgroundOwner
+    _g_backgroundOwner = owner
+
+
+def _stopBackgroundCommands(owner=None) :
+    """Stop the registered background commands of the given owner, or all of
+    them. Called by the runner; not part of the test-facing API."""
+    for bg in [b for b in _g_backgroundCommands if owner is None or b._owner == owner] :
+        # One command that cannot be stopped must not keep the runner from
+        # stopping the rest, or from reporting.
+        try :
+            bg.stop()
+        except Exception as e :
+            print(f"{_doIndentString()}    {Fore.RED}ERROR: could not stop background command "
+                  f"{bg.cmd}: {e}{Style.RESET_ALL}")
+            if bg in _g_backgroundCommands :
+                _g_backgroundCommands.remove(bg)
+
+
+def _killBackgroundCommands() :
+    """Kill every registered background command's process tree at once,
+    without waiting or printing. For the runner's emergency-abort path (a
+    second Ctrl-C), which runs inside a signal handler: waiting on a Popen
+    there could deadlock against the interrupted main thread, and printing
+    could re-enter a write already in progress."""
+    for bg in list(_g_backgroundCommands) :
+        _killProcessTree(bg._popen.pid)
+
+
+# Normal runs stop everything explicitly; this covers wct being used outside
+# the runner and abnormal exits. Registered after _workspace's cleanup, so it
+# runs first (atexit is LIFO): processes stop before their cwd is deleted.
+atexit.register(_stopBackgroundCommands)
+
+
+##############################################################################
+# Internal snapshot of per-test bookkeeping (for retryUntilPass)
+##############################################################################
+
+# A failed retryUntilPass attempt may have opened scopes, closed some, bumped
+# the indent, recorded xfail blocks or started background commands. Rolling
+# that back before the next attempt keeps a section inside the retried
+# function from nesting inside itself ("probe / probe") or being counted once
+# per attempt, and a server it starts from running once per attempt.
+
+def _snapshotTestState() :
+    return {
+        "indentLevel": _g_indentLevel,
+        "scopeStack": list(_g_scopeStack),
+        "scopeResultCount": len(_g_scopeResults),
+        "xfailBlockCount": len(_g_xfailBlocks),
+        "xfailWholeTestReason": _g_xfailWholeTestReason,
+        "backgroundCommands": list(_g_backgroundCommands),
+    }
+
+
+def _restoreTestState(snapshot) :
+    global _g_indentLevel, _g_xfailWholeTestReason
+    _g_indentLevel = snapshot["indentLevel"]
+    _g_scopeStack[:] = snapshot["scopeStack"]
+    del _g_scopeResults[snapshot["scopeResultCount"]:]
+    del _g_xfailBlocks[snapshot["xfailBlockCount"]:]
+    _g_xfailWholeTestReason = snapshot["xfailWholeTestReason"]
+    for bg in [b for b in _g_backgroundCommands if b not in snapshot["backgroundCommands"]] :
+        bg._stop(announce=False)
+
+
+##############################################################################
 # Internal type-check utilities
 ##############################################################################
 
@@ -199,6 +289,22 @@ def _isPositiveNumber(n) -> bool :
     # require strictly positive — a zero or negative timeout would kill the
     # command instantly, which is never what a test author means.
     return isinstance(n, (int, float)) and not isinstance(n, bool) and n > 0
+
+
+def _isEnvDict(v) -> bool :
+    # Variable names map to a string value, or to None to remove the variable.
+    if not isinstance(v, dict) :
+        return False
+    for name, value in v.items() :
+        if not _isString(name) or name == "" :
+            return False
+        if value is not None and not _isString(value) :
+            return False
+    return True
+
+
+def _isStringOrBytes(v) -> bool :
+    return isinstance(v, (str, bytes))
 
 
 ##############################################################################
@@ -261,10 +367,12 @@ def _endTest() :
 # Table of recognised keys in a checkRunCommand testvals dict. Each entry maps
 # the key name to (validator, human description). A None value for any key is
 # always accepted (treated as 'not set'). Length-having values must also be
-# non-empty.
+# non-empty, except for the keys in _DESCRIPTOR_EMPTY_OK.
 _DESCRIPTOR_VALIDATORS = {
     "cmd":                   (_isListOfStrings,    "a non-empty list of strings"),
     "timeout":               (_isPositiveNumber,   "a positive number of seconds"),
+    "env":                   (_isEnvDict,          "a dict mapping variable names to strings, or to None to remove them"),
+    "stdin":                 (_isStringOrBytes,    "a string or bytes"),
     "expect_stdout":         (_isStringOrList,     "a non-empty string or list of strings"),
     "dontexpect_stdout":     (_isStringOrList,     "a non-empty string or list of strings"),
     "expect_stderr":         (_isStringOrList,     "a non-empty string or list of strings"),
@@ -274,13 +382,22 @@ _DESCRIPTOR_VALIDATORS = {
     "check_json_stdout":     (_isListOfJsonFields, "a non-empty list of JSON field tests"),
 }
 
+# An empty stdin is a meaningful input (the child sees EOF at once), and an
+# empty env is a harmless no-op that a test building its overrides
+# programmatically produces naturally, e.g. removing only those suite
+# variables that happen to be set.
+_DESCRIPTOR_EMPTY_OK = {"env", "stdin"}
 
-def _validateCommandStruct(v) -> bool :
+
+def _validateCommandStruct(v, allowedKeys=None) -> bool :
+    """Validate a command descriptor. allowedKeys narrows the recognised keys
+    to a subset of _DESCRIPTOR_VALIDATORS (startBackgroundCommand takes only
+    the launch keys); None allows them all."""
     if not isinstance(v, dict) :
         print("WARNING: invalid command descriptor. Must be a dict.")
         return False
     for key, val in v.items() :
-        if key not in _DESCRIPTOR_VALIDATORS :
+        if key not in _DESCRIPTOR_VALIDATORS or (allowedKeys is not None and key not in allowedKeys) :
             print(f"    WARN: Unrecognized entry '{key}' found.")
             return False
         if val is None :
@@ -289,10 +406,123 @@ def _validateCommandStruct(v) -> bool :
         if not check(val) :
             print(f"    WARN: '{key}' must be {desc}.")
             return False
-        if hasattr(val, '__len__') and len(val) == 0 :
+        if hasattr(val, '__len__') and len(val) == 0 and key not in _DESCRIPTOR_EMPTY_OK :
             print(f"    WARN: '{key}' must be {desc} (got empty).")
             return False
     return True
+
+
+def _childEnv(overrides) :
+    """The environment for a child process: the runner's own environment with
+    the descriptor's 'env' overrides merged over it, where a value of None
+    removes the variable. Returns None when there are no overrides, which
+    subprocess takes to mean 'inherit' — exactly the behavior without the key.
+    The runner's os.environ is never modified."""
+    if overrides is None :
+        return None
+    env = os.environ.copy()
+    for name, value in overrides.items() :
+        # Windows variable names are case-insensitive, and os.environ.copy()
+        # there yields upper-cased names. Match that, so that overriding or
+        # removing "Path" acts on the inherited "PATH" rather than adding a
+        # second, differently-cased entry.
+        if os.name == "nt" :
+            name = name.upper()
+        if value is None :
+            env.pop(name, None)
+        else :
+            env[name] = value
+    return env
+
+
+def _commandFound(cmd, useShell, childEnv) -> bool :
+    """Whether cmd[0] can be found before trying to launch it, since the
+    subprocess functions do not deal with a missing executable gracefully.
+    Always true in shell mode, because cmd[0] may legitimately contain shell
+    syntax (pipelines, redirects, etc.) that shutil.which cannot resolve.
+    Looks where the launch will look: subprocess searches the child's PATH on
+    POSIX, but CreateProcess on Windows searches the runner's own."""
+    if useShell :
+        return True
+    whichPath = None
+    if childEnv is not None and os.name != "nt" :
+        whichPath = childEnv.get("PATH", os.defpath)
+    return shutil.which(cmd[0], path=whichPath) is not None
+
+
+##############################################################################
+# Internal process-tree termination (for background commands)
+##############################################################################
+
+# A background command runs as the leader of its own process group on POSIX
+# (start_new_session), so signalling the group reaches everything it started,
+# e.g. the real server behind a launcher script. On Windows, taskkill /T walks
+# the tree from the command's PID instead.
+#
+# Signalling a group by ID is only safe while that ID cannot have been handed
+# to someone else. The leader's PID doubles as the group ID, and the kernel
+# does not reuse a PID until its process has been reaped. So the leader is
+# left unreaped (a zombie, if it exits early) until stop has signalled the
+# group for the last time: exit checks use _peekExitCode, never Popen.poll.
+# (On Windows the Popen's open process handle keeps the PID reserved.)
+
+def _peekExitCode(popen) :
+    """The command's exit code if it has exited, otherwise None, without
+    reaping it where the platform allows (os.waitid with WNOWAIT; not on
+    macOS before Python 3.13, which falls back to reaping). Codes follow
+    Popen's convention: negative for death by a signal."""
+    if popen.returncode is not None :
+        return popen.returncode
+    if os.name == "nt" or not hasattr(os, "waitid") or not hasattr(os, "WNOWAIT") :
+        return popen.poll()
+    try :
+        info = os.waitid(os.P_PID, popen.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+    except ChildProcessError :
+        return popen.poll()
+    if info is None :
+        return None
+    return info.si_status if info.si_code == os.CLD_EXITED else -info.si_status
+
+
+def _signalGroup(pgid, sig) -> bool :
+    """Send sig to a POSIX process group. False once the group is gone. A
+    PermissionError means the ID now belongs to someone else's process, which
+    is as gone as far as this command is concerned."""
+    try :
+        os.killpg(pgid, sig)
+        return True
+    except (ProcessLookupError, PermissionError) :
+        return False
+
+
+def _killProcessTree(pid) :
+    """Kill a background command's whole tree at once, without waiting."""
+    if os.name == "nt" :
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True)
+    else :
+        _signalGroup(pid, signal.SIGKILL)
+
+
+def _terminateProcessTree(popen, timeout) :
+    """Stop a background command and everything it started, then reap it."""
+    if os.name == "nt" :
+        # Windows has no counterpart of SIGTERM that console programs reliably
+        # handle, so this is a hard kill.
+        _killProcessTree(popen.pid)
+    else :
+        # Ask the whole group to exit and give the leader until the timeout;
+        # then kill whatever of the group remains, such as children the leader
+        # did not wait for. Both signals go out before the leader is reaped.
+        deadline = time.monotonic() + timeout
+        _signalGroup(popen.pid, signal.SIGTERM)
+        while _peekExitCode(popen) is None and time.monotonic() < deadline :
+            time.sleep(0.05)
+        _killProcessTree(popen.pid)
+    try :
+        popen.wait(timeout=max(timeout, 5))
+    except subprocess.TimeoutExpired :
+        popen.kill()
+        popen.wait()
 
 
 ##############################################################################
@@ -404,6 +634,26 @@ def passTest(message: str) :
     print(f"{_doIndentString()}    {Fore.GREEN}PASS: ({message}){Style.RESET_ALL}")
 
 
+def checkTrue(condition, message: str) :
+    """Assert a condition computed in Python. Prints a PASS line with the
+    message when the condition is truthy; otherwise fails the test with it.
+    Use for custom checks that no check* function covers, so that a passing
+    result still shows up in the report."""
+    if condition :
+        passTest(message)
+    else :
+        failTest(message)
+
+
+def checkEqual(actual, expected, message: str) :
+    """Assert that a value computed in Python equals the expected one. Like
+    checkTrue, but a failure also shows both values."""
+    if actual == expected :
+        passTest(message)
+    else :
+        failTest(f"{message} [got {actual!r}, expected {expected!r}]")
+
+
 def checkRunCommand(testvals: dict, useShell: bool = False) -> tuple[int, str, str] :
     firstfail = True
     def firstFailFunc() :
@@ -422,11 +672,9 @@ def checkRunCommand(testvals: dict, useShell: bool = False) -> tuple[int, str, s
         print("        invalid test command descriptor")
         _endTest()
 
-    # The executable might not be found and subprocess.run does not deal with
-    # that gracefully. Skip the existence check in shell mode because cmd[0]
-    # may legitimately contain shell syntax (pipelines, redirects, etc.)
-    # that shutil.which cannot resolve.
-    if not useShell and not shutil.which(testvals["cmd"][0]) :
+    childEnv = _childEnv(testvals.get("env"))
+
+    if not _commandFound(testvals["cmd"], useShell, childEnv) :
         firstFailFunc()
         print(f"{_doIndentString()}        {Fore.RED}BAD:  command not found '{testvals['cmd'][0]}'{Style.RESET_ALL}")
         _endTest()
@@ -443,9 +691,18 @@ def checkRunCommand(testvals: dict, useShell: bool = False) -> tuple[int, str, s
     # historical behavior). A hung command otherwise stalls the whole suite,
     # which is especially costly on CI.
     effectiveTimeout = testvals["timeout"] if entryExists("timeout") else _g_defaultTimeout
+
+    # 'stdin' is written to the child's stdin, which is then closed, so a
+    # child that reads to EOF finishes. Without the key the child inherits the
+    # runner's stdin, as it always has. Text goes as UTF-8, the encoding the
+    # child's output is decoded with.
+    stdinData = testvals.get("stdin")
+    if isinstance(stdinData, str) :
+        stdinData = stdinData.encode("utf-8")
+
     try :
         result = subprocess.run(cmdToRun, capture_output=True, shell=useShell,
-                                timeout=effectiveTimeout)
+                                timeout=effectiveTimeout, env=childEnv, input=stdinData)
     except subprocess.TimeoutExpired :
         # subprocess.run kills the direct child before re-raising. With
         # shell=True a pipeline's grandchildren can outlive the shell — that
@@ -584,6 +841,181 @@ def checkRunShellCommand(testvals: dict) -> tuple[int, str, str] :
     return checkRunCommand(testvals, True)
 
 
+# The descriptor keys startBackgroundCommand takes: how to launch the command.
+# What to expect of it is asked afterwards, through waitForOutput.
+_BACKGROUND_KEYS = ("cmd", "env")
+
+# How much of a background command's output a failed waitForOutput shows.
+_BACKGROUND_OUTPUT_TAIL_LINES = 100
+
+
+class BackgroundCommand :
+    """A command started by startBackgroundCommand, running alongside the
+    test. Its stdout and stderr are captured together, as it writes them."""
+
+    def __init__(self, cmd, popen, owner) :
+        self.cmd = cmd
+        self._popen = popen
+        self._owner = owner
+        self._cond = threading.Condition()
+        self._text = ""
+        self._eof = False
+        self._cursor = 0
+        # Drain the pipe continuously: otherwise a chatty command fills the OS
+        # pipe buffer and blocks. Daemon, so it can never hold up exit.
+        self._reader = threading.Thread(target=self._readOutput, daemon=True)
+        self._reader.start()
+
+    @property
+    def pid(self) -> int :
+        return self._popen.pid
+
+    @property
+    def returncode(self) :
+        """The exit code once the command has exited, otherwise None."""
+        return _peekExitCode(self._popen)
+
+    def isRunning(self) -> bool :
+        return _peekExitCode(self._popen) is None
+
+    def output(self) -> str :
+        """Everything the command has written so far, stdout and stderr
+        interleaved as they arrived."""
+        with self._cond :
+            return self._text
+
+    def _readOutput(self) :
+        # Decode leniently: an undecodable byte in a server's log must not
+        # kill the reader and leave the pipe to fill up.
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        try :
+            while True :
+                data = self._popen.stdout.read1(65536)
+                if not data :
+                    break
+                text = decoder.decode(data)
+                with self._cond :
+                    self._text += text
+                    self._cond.notify_all()
+        except (OSError, ValueError) :
+            pass
+        finally :
+            with self._cond :
+                self._text += decoder.decode(b"", final=True)
+                self._eof = True
+                self._cond.notify_all()
+
+    def waitForOutput(self, pattern: str, timeout: float = 30) :
+        """Wait until the command's output matches the regex pattern, and
+        return the re.Match, so a value such as a port can be read from a
+        group. Each successful wait consumes the output up to the end of its
+        match, and the next wait looks only at what comes after it. Fails the
+        test if timeout seconds pass, or the command exits, first."""
+        regex = re.compile(pattern, flags=re.MULTILINE)
+        deadline = time.monotonic() + timeout
+        with self._cond :
+            while True :
+                match = regex.search(self._text, self._cursor)
+                if match or self._eof :
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 :
+                    break
+                self._cond.wait(remaining)
+            text = self._text
+            eof = self._eof
+
+        if match :
+            self._cursor = match.end()
+            print(f"{_doIndentString()}    {Fore.GREEN}PASS: {self.cmd} output matched r\"{pattern}\"{Style.RESET_ALL}")
+            return match
+
+        if eof :
+            # The output closes as the command exits; give the exit a moment
+            # to become visible so the code can be reported.
+            exitDeadline = time.monotonic() + 1
+            while _peekExitCode(self._popen) is None and time.monotonic() < exitDeadline :
+                time.sleep(0.05)
+            code = _peekExitCode(self._popen)
+            if code is None :
+                reason = f"closed its output before it matched r\"{pattern}\""
+            else :
+                reason = f"exited with code {code} before output matched r\"{pattern}\""
+        else :
+            reason = f"no match for r\"{pattern}\" within {timeout}s"
+        print(f"{_doIndentString()}    {Fore.RED}FAIL: {self.cmd}{Style.RESET_ALL}")
+        print(f"{_doIndentString()}        {Fore.RED}BAD:  waitForOutput [{reason}]{Style.RESET_ALL}")
+        print(f"{_doIndentString()}        {Fore.RED}OUTPUT:{Style.RESET_ALL}")
+        lines = text.splitlines()
+        if len(lines) > _BACKGROUND_OUTPUT_TAIL_LINES :
+            print(f"{_doIndentString()}            ({len(lines) - _BACKGROUND_OUTPUT_TAIL_LINES} earlier lines not shown)")
+            lines = lines[-_BACKGROUND_OUTPUT_TAIL_LINES:]
+        for line in lines :
+            print(f"{_doIndentString()}            {line}")
+        _endTest()
+
+    def stop(self, timeout: float = 5) -> int :
+        """Stop the command and everything it started, and return its exit
+        code. On POSIX its process group is sent SIGTERM, and once the command
+        has exited, or timeout seconds have passed, whatever is left of the
+        group is killed. On Windows the tree is killed at once. Stopping a
+        command that has already been stopped just returns its code."""
+        self._stop(timeout)
+        return self._popen.returncode
+
+    def _stop(self, timeout: float = 5, announce: bool = True) :
+        wasRunning = _peekExitCode(self._popen) is None
+        # Even when the command itself has exited, what it started may not
+        # have, so the tree is always terminated.
+        _terminateProcessTree(self._popen, timeout)
+        self._reader.join(timeout=1)
+        if self in _g_backgroundCommands :
+            _g_backgroundCommands.remove(self)
+        if announce and wasRunning :
+            print(f"{_doIndentString()}    {Fore.YELLOW}Stopped background command: {self.cmd}{Style.RESET_ALL}")
+
+
+def startBackgroundCommand(testvals: dict, useShell: bool = False) -> BackgroundCommand :
+    """Start a long-running command, such as a server the test talks to, and
+    return a BackgroundCommand for it without waiting. The descriptor takes
+    'cmd' and 'env' as checkRunCommand does; stdin is empty. The command runs
+    until stopped: by BackgroundCommand.stop, or by the runner when the test
+    that started it ends (for a --setup or --teardown script, when the run
+    ends), whether the test passed, failed or errored."""
+    if not _validateCommandStruct(testvals, _BACKGROUND_KEYS) :
+        print(f"{_doIndentString()}    {Fore.RED}FAIL: {testvals.get('cmd')}{Style.RESET_ALL}")
+        print("        invalid background command descriptor")
+        _endTest()
+
+    childEnv = _childEnv(testvals.get("env"))
+    if not _commandFound(testvals["cmd"], useShell, childEnv) :
+        print(f"{_doIndentString()}    {Fore.RED}FAIL: {testvals['cmd']}{Style.RESET_ALL}")
+        print(f"{_doIndentString()}        {Fore.RED}BAD:  command not found '{testvals['cmd'][0]}'{Style.RESET_ALL}")
+        _endTest()
+
+    # Joined for the shell, as in checkRunCommand. Its own process group (see
+    # _terminateProcessTree) also keeps a Ctrl-C at the terminal from reaching
+    # it directly; the runner stops it instead.
+    cmdToRun = " ".join(testvals["cmd"]) if useShell else testvals["cmd"]
+    if os.name == "nt" :
+        groupArgs = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    else :
+        groupArgs = {"start_new_session": True}
+    try :
+        popen = subprocess.Popen(cmdToRun, shell=useShell, env=childEnv,
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, **groupArgs)
+    except OSError as e :
+        print(f"{_doIndentString()}    {Fore.RED}FAIL: {testvals['cmd']}{Style.RESET_ALL}")
+        print(f"{_doIndentString()}        {Fore.RED}BAD:  could not start [{e}]{Style.RESET_ALL}")
+        _endTest()
+
+    bg = BackgroundCommand(testvals["cmd"], popen, _g_backgroundOwner)
+    _g_backgroundCommands.append(bg)
+    print(f"{_doIndentString()}    {Fore.YELLOW}Started background command: {testvals['cmd']} (pid {popen.pid}){Style.RESET_ALL}")
+    return bg
+
+
 def checkPathExists(fn: str) :
     if os.path.exists(fn) :
         passTest(f"File exists - '{fn}'")
@@ -610,6 +1042,60 @@ def checkFileReadOnly(fn: str) :
         passTest(f"File read only - '{fn}'")
     else :
         failTest(f"File writeable - '{fn}'")
+
+
+def retryUntilPass(fn, timeout, interval: float = 1.0) :
+    """Call fn (with no arguments) until it returns without a failed check, or
+    until timeout seconds have passed, and return what fn returned. For checks
+    that pass only once the system under test settles, such as a command that
+    flaps while a service registers.
+
+    Output of failed attempts is suppressed. A pass on the first attempt looks
+    exactly like calling fn directly; a later pass also notes the attempt
+    count. When no attempt passes, the last attempt's output is shown and its
+    failure fails the test. Waits interval seconds between attempts and starts
+    none after the timeout. Only a failed check is retried: any other
+    exception propagates at once, as a broken test rather than a flap."""
+    if not _isPositiveNumber(timeout) :
+        failTest("retryUntilPass: timeout must be a positive number of seconds")
+    if isinstance(interval, bool) or not isinstance(interval, (int, float)) or interval < 0 :
+        failTest("retryUntilPass: interval must be a non-negative number of seconds")
+
+    noteIndent = _doIndentString()
+    startTime = time.monotonic()
+    deadline = startTime + timeout
+    attempt = 0
+    while True :
+        attempt += 1
+        snapshot = _snapshotTestState()
+        captured = io.StringIO()
+        try :
+            with contextlib.redirect_stdout(captured) :
+                result = fn()
+        except TestFailed as e :
+            failure = e
+        except BaseException :
+            # Not a flap: show what the attempt printed and let it propagate.
+            print(captured.getvalue(), end="")
+            raise
+        else :
+            if attempt > 1 :
+                print(f"{noteIndent}    {Fore.YELLOW}Retry: passed on attempt {attempt} "
+                      f"after {time.monotonic() - startTime:.1f}s{Style.RESET_ALL}")
+            print(captured.getvalue(), end="")
+            return result
+
+        if time.monotonic() + interval >= deadline :
+            break
+        _restoreTestState(snapshot)
+        time.sleep(interval)
+
+    # The last attempt's state is left as it failed, so that, as for a direct
+    # call, the runner attributes the failure to any scope it left open.
+    print(f"{noteIndent}    {Fore.YELLOW}Retry: gave up after {attempt} attempts over "
+          f"{time.monotonic() - startTime:.1f}s; last attempt:{Style.RESET_ALL}")
+    print(captured.getvalue(), end="")
+    raise failure
 
 
 class expectFail :
