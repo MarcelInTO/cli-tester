@@ -199,6 +199,29 @@ checkRunShellCommand({
 
 The `cmd` list is joined with spaces and passed to the shell — there is no automatic quoting, so if you need a literal argument with spaces or special characters, quote it yourself within the list element.
 
+## Background commands
+
+Some tests need a long-running process beside them, such as a server that the CLI under test talks to. `startBackgroundCommand` starts one and returns straight away with a handle:
+
+```python
+from wct import checkRunCommand, startBackgroundCommand
+
+server = startBackgroundCommand({"cmd": ["./myserver", "--port", "0"]})
+port = int(server.waitForOutput(r"listening on port (\d+)").group(1))
+
+checkRunCommand({"cmd": ["./mytool", "--server", f"localhost:{port}", "ping"], "expect_returncode": 0})
+```
+
+- **You don't have to stop it.** When the test that started a background command ends, whether it passed, failed or errored, wct stops anything it left running. A failing test can't leave a server behind holding a port. A background command started by a `--setup` script lives for the whole run and is stopped after `--teardown`.
+- The descriptor takes `cmd` and `env`, as for `checkRunCommand`; pass `useShell=True` as the second argument to run it through the shell. Its stdin is empty, and its stdout and stderr are captured together.
+- `waitForOutput(pattern, timeout=30)` waits until the output matches the regex, prints a `PASS` line and returns the `re.Match`, so a value like a port can be read from a group. If the timeout passes, or the command exits, before a match, the test fails and the command's output is shown. Each successful wait consumes output up to the end of its match, and the next wait sees only what comes after it. After running a command, a wait for the log line it causes won't be fooled by an older copy of that line.
+- `stop(timeout=5)` stops the command and everything it started, and returns its exit code. On Linux and macOS it is sent `SIGTERM`, then killed if it hasn't exited within `timeout` seconds; on Windows it is killed at once.
+- `output()` returns everything captured so far; `isRunning()`, `returncode` and `pid` report on the process.
+
+A program writing to a pipe often holds its output in a buffer until the buffer fills. If `waitForOutput` times out on a line you know the command printed, make the command flush its output. For a Python program, use `print(..., flush=True)`, or set `PYTHONUNBUFFERED=1` in `env`.
+
+What stopping can't reach: a process that detaches into a session or process group of its own (a daemon) escapes the stop, and on Windows, once the command itself has exited, the processes it started are no longer tracked. A hard kill of wct (`kill -9`, `taskkill /F`) leaves background commands running.
+
 ## Suite-level setup and teardown
 
 For tests that share an expensive precondition — booting a server, provisioning a transient database schema — wct can run a setup script once before the suite and a teardown script once after.
@@ -234,7 +257,7 @@ schema = getState("schema")
 
 - If setup fails, tests do not run. Teardown still runs, against whatever state setup recorded before failing.
 - If teardown fails, the exit code becomes `1` and the teardown failure is reported on its own line so it doesn't get conflated with the test counts.
-- `Ctrl-C` during the test phase stops new tests from starting, runs teardown, and exits non-zero. A second `Ctrl-C` skips teardown.
+- `Ctrl-C` during the test phase stops new tests from starting, runs teardown, and exits non-zero. A second `Ctrl-C` skips teardown, but still kills any [background commands](#background-commands).
 
 **Teardown must tolerate missing state** because of partial-setup failures — if setup boots one server, records its PID, and then fails on a second server, teardown still needs to clean up the first one. `getState` returns `None` (or the supplied default) when a key was never set, and the natural idiom uses null-checks:
 
@@ -356,6 +379,7 @@ When `--setup` or `--teardown` are used, the JUnit report includes synthetic tes
 
 - **`checkRunCommand(testvals)`** — run a process and assert on its output.
 - **`checkRunShellCommand(testvals)`** — same, but the command runs via the shell (so pipes, redirects, glob expansion, etc. work).
+- **`startBackgroundCommand(testvals, useShell=False)`** — start a long-running command and return a handle with `waitForOutput(pattern, timeout=30)`, `stop(timeout=5)`, `output()`, `isRunning()`, `returncode` and `pid`. `testvals` takes only `cmd` and `env`. Stopped automatically when the test that started it ends. See [Background commands](#background-commands).
 
 `testvals` is a dict with the following keys (all optional except `cmd`):
 

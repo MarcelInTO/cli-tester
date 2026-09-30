@@ -22,10 +22,13 @@ from . import (
     _closeInnermostScopeAs,
     _getScopeResults,
     _getXfailState,
+    _killBackgroundCommands,
     _resetIndentLevel,
     _resetScopeState,
     _resetXfailState,
+    _setBackgroundOwner,
     _setDefaultTimeout,
+    _stopBackgroundCommands,
 )
 from ._workspace import getRunRoot, getStateFilePath, resetRunRoot
 
@@ -150,10 +153,13 @@ def _installSigintHandler() :
     """First Ctrl-C sets a flag; the test loop checks it between tests and
     breaks out so teardown still gets to run. A second Ctrl-C restores the
     default handler and re-raises, giving the user an emergency abort path
-    (matching the doc: 'a second Ctrl-C or SIGKILL skips teardown')."""
+    (matching the doc: 'a second Ctrl-C or SIGKILL skips teardown'). The
+    abort still kills background commands: they run in their own process
+    group, so the Ctrl-C itself never reaches them."""
     def handler(sig, frame) :
         global _g_stopFlag
         if _g_stopFlag :
+            _killBackgroundCommands()
             signal.signal(signal.SIGINT, signal.SIG_DFL)
             os.kill(os.getpid(), signal.SIGINT)
             return
@@ -326,8 +332,11 @@ def main() -> int :
 
     if setupAbs :
         os.chdir(callerCwd)
+        # Background commands started by setup live until the run ends.
+        _setBackgroundOwner("suite")
         setupResult = _runScript(args.setup, setupAbs, "Running setup",
                                  "__suite_setup__", "wct.suite")
+        _setBackgroundOwner("test")
 
     setupFailed = setupResult is not None and setupResult["status"] != "passed"
 
@@ -379,6 +388,11 @@ def main() -> int :
                       file=sys.stderr)
                 traceback.print_exc()
 
+            # Stop whatever background commands the test left running, whether
+            # it passed or not, before the next test wipes their cwd.
+            _resetIndentLevel()
+            _stopBackgroundCommands("test")
+
             duration = time.monotonic() - startTime
 
             # Fold xfail bookkeeping into the test-level outcome. errored takes
@@ -420,8 +434,14 @@ def main() -> int :
 
     if teardownAbs :
         os.chdir(callerCwd)
+        _setBackgroundOwner("suite")
         teardownResult = _runScript(args.teardown, teardownAbs, "Running teardown",
                                     "__suite_teardown__", "wct.suite")
+
+    # Teardown has had its chance to shut suite-level commands down itself;
+    # stop whatever is still running.
+    _resetIndentLevel()
+    _stopBackgroundCommands()
 
     passed = sum(1 for r in testResults if r["status"] == "passed")
     failed = sum(1 for r in testResults if r["status"] == "failed")
