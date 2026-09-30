@@ -50,11 +50,12 @@ def _doIndentString() -> str :
     return "    " * _g_indentLevel
 
 
-def _resetIndentLevel() :
+def _resetIndentLevel(level: int = 1) :
     """Reset indent state between tests. Called by the runner; not part of the
-    test-facing API."""
+    test-facing API. The runner passes a deeper level to nest a per-test
+    hook's output under its header."""
     global _g_indentLevel
-    _g_indentLevel = 1
+    _g_indentLevel = level
 
 
 ##############################################################################

@@ -67,6 +67,12 @@ def _parseArgs() :
                         help='script to run once before any tests')
     parser.add_argument('--teardown', type=str, metavar='PATH',
                         help='script to run once after all tests (runs even if setup or tests failed)')
+    parser.add_argument('--setup-each', type=str, metavar='PATH',
+                        help="script to run before each test, in that test's workspace; "
+                             "if it fails the test is not run")
+    parser.add_argument('--teardown-each', type=str, metavar='PATH',
+                        help="script to run after each test, in that test's workspace "
+                             "(runs even if setup-each or the test failed)")
     return parser.parse_args()
 
 
@@ -194,6 +200,26 @@ def _runPath(absPath) :
                 del sys.modules[name]
 
 
+def _runGuarded(absPath, what) :
+    """Run a test or hook script via _runPath and classify how it ended, as
+    (status, message): "passed"; "failed" for a failed check or a non-zero
+    sys.exit; "errored" for any other exception, whose traceback is printed."""
+    try :
+        _runPath(absPath)
+    except TestFailed as e :
+        return "failed", str(e)
+    except SystemExit as e :
+        if e.code not in (0, None) :
+            return "failed", f"sys.exit({e.code!r})"
+    except Exception :
+        message = traceback.format_exc()
+        print(f"    {Fore.RED}ERROR: {what} raised an unexpected exception{Style.RESET_ALL}",
+              file=sys.stderr)
+        traceback.print_exc()
+        return "errored", message
+    return "passed", ""
+
+
 def _runScript(displayPath, absPath, header, name, classname) -> dict :
     """Run a setup or teardown script using the same in-process runpy mechanism
     as tests, but without a workspace reset — these scripts run in the caller's
@@ -201,26 +227,8 @@ def _runScript(displayPath, absPath, header, name, classname) -> dict :
     _resetIndentLevel()
     print(f"    {Fore.YELLOW}{header} '{Path(displayPath).as_posix()}'{Style.RESET_ALL}")
 
-    status = "passed"
-    message = ""
     startTime = time.monotonic()
-
-    try :
-        _runPath(absPath)
-    except TestFailed as e :
-        status = "failed"
-        message = str(e)
-    except SystemExit as e :
-        if e.code not in (0, None) :
-            status = "failed"
-            message = f"sys.exit({e.code!r})"
-    except Exception :
-        status = "errored"
-        message = traceback.format_exc()
-        print(f"    {Fore.RED}ERROR: {header.lower()} raised an unexpected exception{Style.RESET_ALL}",
-              file=sys.stderr)
-        traceback.print_exc()
-
+    status, message = _runGuarded(absPath, header.lower())
     duration = time.monotonic() - startTime
     return {
         "name": name,
@@ -229,6 +237,24 @@ def _runScript(displayPath, absPath, header, name, classname) -> dict :
         "status": status,
         "message": message,
     }
+
+
+def _runHook(displayPath, absPath, label) :
+    """Run a --setup-each or --teardown-each script in the current test's
+    workspace, its output nested under a header of its own. The per-test
+    bookkeeping is reset on both sides, so nothing the hook does with
+    sections, variants or xfail markers is attributed to the test, nor the
+    test's to the hook. Returns (status, message) as _runGuarded does."""
+    _resetIndentLevel()
+    _resetXfailState()
+    _resetScopeState()
+    print(f"        {Fore.YELLOW}Running {label} '{Path(displayPath).as_posix()}'{Style.RESET_ALL}")
+    _resetIndentLevel(2)
+    status, message = _runGuarded(absPath, label)
+    _resetIndentLevel()
+    _resetXfailState()
+    _resetScopeState()
+    return status, message
 
 
 def _applyXfail(status, message, xfailState) :
@@ -299,6 +325,10 @@ def main() -> int :
             print(f"    setup: {args.setup}")
         if args.teardown :
             print(f"    teardown: {args.teardown}")
+        if args.setup_each :
+            print(f"    setup-each: {args.setup_each}")
+        if args.teardown_each :
+            print(f"    teardown-each: {args.teardown_each}")
 
     tests = _expandTests(args.testname)
     if not tests :
@@ -315,6 +345,8 @@ def main() -> int :
     junitPath = os.path.abspath(args.junit) if args.junit else None
     setupAbs = os.path.abspath(args.setup) if args.setup else None
     teardownAbs = os.path.abspath(args.teardown) if args.teardown else None
+    setupEachAbs = os.path.abspath(args.setup_each) if args.setup_each else None
+    teardownEachAbs = os.path.abspath(args.teardown_each) if args.teardown_each else None
     callerCwd = Path.cwd()
 
     # Drop any leftover state.json from a hard-killed prior wct that happened
@@ -372,28 +404,20 @@ def main() -> int :
             message = ""
             startTime = time.monotonic()
 
-            try :
-                _runPath(absTest)
-            except TestFailed as e :
-                status = "failed"
-                message = str(e)
-            except SystemExit as e :
-                if e.code not in (0, None) :
-                    status = "failed"
-                    message = f"sys.exit({e.code!r})"
-            except Exception :
-                status = "errored"
-                message = traceback.format_exc()
-                print(f"    {Fore.RED}ERROR: test raised an unexpected exception{Style.RESET_ALL}",
-                      file=sys.stderr)
-                traceback.print_exc()
+            # A failed setup-each means the test would not start from the
+            # state it expects, so it is not run and is reported as errored,
+            # as every test is when the suite setup fails.
+            if setupEachAbs :
+                hookStatus, hookMessage = _runHook(args.setup_each, setupEachAbs, "setup-each")
+                if hookStatus != "passed" :
+                    status = "errored"
+                    message = "setup-each failed; test did not run"
+                    print(f"        {Fore.RED}{message}{Style.RESET_ALL}")
+                    if hookMessage :
+                        message += f": {hookMessage}"
 
-            # Stop whatever background commands the test left running, whether
-            # it passed or not, before the next test wipes their cwd.
-            _resetIndentLevel()
-            _stopBackgroundCommands("test")
-
-            duration = time.monotonic() - startTime
+            if status == "passed" :
+                status, message = _runGuarded(absTest, "test")
 
             # Fold xfail bookkeeping into the test-level outcome. errored takes
             # priority — an unhandled exception means the test machinery itself
@@ -408,6 +432,36 @@ def main() -> int :
                 _closeInnermostScopeAs(status, message)
 
             scopeResults = _getScopeResults()
+
+            # The test's results are collected above, before teardown-each can
+            # touch the bookkeeping. It runs even when setup-each or the test
+            # failed, to undo whatever they did get done, and in the
+            # workspace, wherever the test left the cwd.
+            teardownEachFailure = None
+            if teardownEachAbs :
+                hookStart = time.monotonic()
+                try :
+                    os.chdir(workspace)
+                except OSError :
+                    pass
+                hookStatus, hookMessage = _runHook(args.teardown_each, teardownEachAbs, "teardown-each")
+                if hookStatus != "passed" :
+                    teardownEachFailure = {
+                        "name": f"{_testName(displayPath)}::__teardown_each__",
+                        "classname": _testClassname(displayPath),
+                        "duration": time.monotonic() - hookStart,
+                        "status": hookStatus,
+                        "message": hookMessage or "teardown-each failed",
+                    }
+
+            # Stop whatever background commands the test (or its hooks) left
+            # running, whether it passed or not, before the next test wipes
+            # their cwd.
+            _resetIndentLevel()
+            _stopBackgroundCommands("test")
+
+            duration = time.monotonic() - startTime
+
             if scopeResults :
                 # The file used variantBegin / sectionBegin: emit one testcase
                 # per scope, named "<filebasename>::<scope path>", so GitLab's
@@ -431,6 +485,12 @@ def main() -> int :
                     "status": status,
                     "message": message,
                 })
+
+            # A failed teardown-each is a testcase of its own rather than a
+            # relabeling of the test, whose checks passed or failed on their
+            # own merits.
+            if teardownEachFailure :
+                testResults.append(teardownEachFailure)
 
     if teardownAbs :
         os.chdir(callerCwd)

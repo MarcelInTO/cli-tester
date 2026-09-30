@@ -86,6 +86,7 @@ wct 'tests/test_*.py'
 ```
 wct <test_path_or_glob> [<test_path_or_glob> ...]
     [-p PATH] [-v] [--timeout SECONDS] [--junit FILE] [--setup PATH] [--teardown PATH]
+    [--setup-each PATH] [--teardown-each PATH]
 ```
 
 - Multiple paths or globs can be listed on one command line.
@@ -95,6 +96,7 @@ wct <test_path_or_glob> [<test_path_or_glob> ...]
 - `--timeout SECONDS` sets a default per-command timeout for every `checkRunCommand`. A command that runs longer is killed and its check fails, instead of a hung program stalling the whole suite (especially useful on CI). Individual commands override it with the descriptor `timeout` key. Without the flag there is no timeout — commands run to completion as before.
 - `--junit FILE` writes a JUnit XML report on completion; see [Continuous integration](#continuous-integration).
 - `--setup PATH` / `--teardown PATH` run a script once before / after the suite; see [Suite-level setup and teardown](#suite-level-setup-and-teardown).
+- `--setup-each PATH` / `--teardown-each PATH` run a script before / after every test; see [Per-test setup and teardown](#per-test-setup-and-teardown).
 
 Each test runs in a clean workspace under `~/.cache/wct/`. The workspace is wiped between tests, so tests cannot rely on prior state.
 
@@ -280,6 +282,23 @@ if (pid := getState("server2_pid")):
 ```
 
 If setup fails after booting server 1 but before recording `server2_pid`, teardown still cleans up server 1.
+
+## Per-test setup and teardown
+
+When every test needs the same fixture set up and removed around it, such as loading a data set into the service under test and deleting it afterwards, put those steps in scripts and let wct run them around each test instead of repeating them in every file:
+
+```sh
+wct --setup-each load_fixture.py --teardown-each delete_fixture.py 'tests/test_*.py'
+```
+
+- Both scripts run in the test's own fresh workspace, so a file setup-each writes to its cwd is there for the test. Teardown-each runs in the workspace too, wherever the test left the cwd. (Suite-level `--setup` / `--teardown` run in the directory you invoked wct from instead.)
+- They are ordinary wct scripts: `checkRunCommand` and the other checks work, and their output appears nested under a `Running setup-each` / `Running teardown-each` header inside each test's output.
+- If setup-each fails, the test does not run and is reported as errored, with the message `setup-each failed; test did not run`.
+- Teardown-each always runs, even when setup-each or the test failed, so it must tolerate a fixture that was never fully created.
+- A failed teardown-each is reported as a testcase of its own, `<test>::__teardown_each__`, rather than marking the test failed. It counts in the summary as one more failed testcase.
+- Background commands started by either script belong to the test: they keep running through the test and teardown-each, and are stopped after it.
+
+Setup-each and the test run in the same process, so setup-each can hand the test a value through `exportEnv` (it runs again before the next test, overwriting the value) or `setState` / `getState`.
 
 ## Marking known-broken cases (xfail)
 
