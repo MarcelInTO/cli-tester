@@ -458,6 +458,31 @@ def _commandFound(cmd, useShell, childEnv) -> bool :
 # (start_new_session), so signalling the group reaches everything it started,
 # e.g. the real server behind a launcher script. On Windows, taskkill /T walks
 # the tree from the command's PID instead.
+#
+# Signalling a group by ID is only safe while that ID cannot have been handed
+# to someone else. The leader's PID doubles as the group ID, and the kernel
+# does not reuse a PID until its process has been reaped. So the leader is
+# left unreaped (a zombie, if it exits early) until stop has signalled the
+# group for the last time: exit checks use _peekExitCode, never Popen.poll.
+# (On Windows the Popen's open process handle keeps the PID reserved.)
+
+def _peekExitCode(popen) :
+    """The command's exit code if it has exited, otherwise None, without
+    reaping it where the platform allows (os.waitid with WNOWAIT; not on
+    macOS before Python 3.13, which falls back to reaping). Codes follow
+    Popen's convention: negative for death by a signal."""
+    if popen.returncode is not None :
+        return popen.returncode
+    if os.name == "nt" or not hasattr(os, "waitid") or not hasattr(os, "WNOWAIT") :
+        return popen.poll()
+    try :
+        info = os.waitid(os.P_PID, popen.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+    except ChildProcessError :
+        return popen.poll()
+    if info is None :
+        return None
+    return info.si_status if info.si_code == os.CLD_EXITED else -info.si_status
+
 
 def _signalGroup(pgid, sig) -> bool :
     """Send sig to a POSIX process group. False once the group is gone. A
@@ -481,21 +506,17 @@ def _killProcessTree(pid) :
 def _terminateProcessTree(popen, timeout) :
     """Stop a background command and everything it started, then reap it."""
     if os.name == "nt" :
-        # There is no portable graceful stop for a Windows console process
-        # that is not attached to our console, so this is a hard kill.
+        # Windows has no counterpart of SIGTERM that console programs reliably
+        # handle, so this is a hard kill.
         _killProcessTree(popen.pid)
     else :
-        # Ask the whole group to exit, and give it (not just the leader) until
-        # the timeout. Polling the leader reaps it once it exits, so that its
-        # zombie does not keep the group looking alive; then kill whatever of
-        # the group remains.
+        # Ask the whole group to exit and give the leader until the timeout;
+        # then kill whatever of the group remains, such as children the leader
+        # did not wait for. Both signals go out before the leader is reaped.
         deadline = time.monotonic() + timeout
-        if _signalGroup(popen.pid, signal.SIGTERM) :
-            while time.monotonic() < deadline :
-                popen.poll()
-                if not _signalGroup(popen.pid, 0) :
-                    break
-                time.sleep(0.05)
+        _signalGroup(popen.pid, signal.SIGTERM)
+        while _peekExitCode(popen) is None and time.monotonic() < deadline :
+            time.sleep(0.05)
         _killProcessTree(popen.pid)
     try :
         popen.wait(timeout=max(timeout, 5))
@@ -852,10 +873,10 @@ class BackgroundCommand :
     @property
     def returncode(self) :
         """The exit code once the command has exited, otherwise None."""
-        return self._popen.poll()
+        return _peekExitCode(self._popen)
 
     def isRunning(self) -> bool :
-        return self._popen.poll() is None
+        return _peekExitCode(self._popen) is None
 
     def output(self) -> str :
         """Everything the command has written so far, stdout and stderr
@@ -912,10 +933,14 @@ class BackgroundCommand :
         if eof :
             # The output closes as the command exits; give the exit a moment
             # to become visible so the code can be reported.
-            try :
-                reason = f"exited with code {self._popen.wait(timeout=1)} before output matched r\"{pattern}\""
-            except subprocess.TimeoutExpired :
+            exitDeadline = time.monotonic() + 1
+            while _peekExitCode(self._popen) is None and time.monotonic() < exitDeadline :
+                time.sleep(0.05)
+            code = _peekExitCode(self._popen)
+            if code is None :
                 reason = f"closed its output before it matched r\"{pattern}\""
+            else :
+                reason = f"exited with code {code} before output matched r\"{pattern}\""
         else :
             reason = f"no match for r\"{pattern}\" within {timeout}s"
         print(f"{_doIndentString()}    {Fore.RED}FAIL: {self.cmd}{Style.RESET_ALL}")
@@ -931,14 +956,15 @@ class BackgroundCommand :
 
     def stop(self, timeout: float = 5) -> int :
         """Stop the command and everything it started, and return its exit
-        code. On POSIX it is sent SIGTERM and killed if it has not exited
-        within timeout seconds; on Windows it is killed at once. Stopping a
-        command that has already stopped or exited just returns its code."""
+        code. On POSIX its process group is sent SIGTERM, and once the command
+        has exited, or timeout seconds have passed, whatever is left of the
+        group is killed. On Windows the tree is killed at once. Stopping a
+        command that has already been stopped just returns its code."""
         self._stop(timeout)
         return self._popen.returncode
 
     def _stop(self, timeout: float = 5, announce: bool = True) :
-        wasRunning = self._popen.poll() is None
+        wasRunning = _peekExitCode(self._popen) is None
         # Even when the command itself has exited, what it started may not
         # have, so the tree is always terminated.
         _terminateProcessTree(self._popen, timeout)

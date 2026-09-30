@@ -6,7 +6,8 @@
 # backstop, so an orphan left by a broken stop still goes away eventually.
 #
 # With --spawn it starts a copy of itself and waits on it instead, standing in
-# for a launcher whose child does the real work (and holds the port).
+# for a launcher whose child does the real work (and holds the port). With
+# --detach it starts the copy and exits at once, leaving the copy running.
 import socket
 import subprocess
 import sys
@@ -14,6 +15,9 @@ import time
 
 if "--spawn" in sys.argv :
     sys.exit(subprocess.call([sys.executable, __file__]))
+if "--detach" in sys.argv :
+    subprocess.Popen([sys.executable, __file__])
+    sys.exit(0)
 
 s = socket.socket()
 s.bind(("127.0.0.1", 0))

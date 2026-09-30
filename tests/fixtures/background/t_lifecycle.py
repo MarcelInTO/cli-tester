@@ -5,10 +5,11 @@
 # output cursor, stderr capture, env, stopping, and stopping twice.
 import sys
 
-from bg_helpers import LAUNCHER_CMD, SHELL_SERVER_CMD, portIsFree, startServer
+from bg_helpers import DETACHING_LAUNCHER_CMD, LAUNCHER_CMD, SHELL_SERVER_CMD, portIsFree, startServer
 from wct import (
     checkEqual,
     checkTrue,
+    operatingSystem,
     retryUntilPass,
     startBackgroundCommand,
     xEscape,
@@ -43,6 +44,17 @@ checkPortFreed(port)
 bg, port = startServer(LAUNCHER_CMD)
 bg.stop()
 checkPortFreed(port)
+
+# A launcher that exits at once, leaving its child holding the port: stop
+# still takes the child down. (Not on Windows, where what a command started
+# is found only through the command while it runs.)
+if operatingSystem() != "Windows" :
+    bg, port = startServer(DETACHING_LAUNCHER_CMD)
+    retryUntilPass(lambda : checkTrue(not bg.isRunning(), "the launcher itself has exited"),
+                   timeout=10, interval=0.1)
+    checkTrue(not portIsFree(port), f"its child still holds port {port}")
+    bg.stop()
+    checkPortFreed(port)
 
 # Shell mode, where the shell sits between the runner and the server.
 bg, port = startServer(SHELL_SERVER_CMD, useShell=True)

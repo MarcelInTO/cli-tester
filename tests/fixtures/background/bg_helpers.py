@@ -14,6 +14,7 @@ _SERVER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "server.py")
 
 SERVER_CMD = [sys.executable, _SERVER]
 LAUNCHER_CMD = [sys.executable, _SERVER, "--spawn"]
+DETACHING_LAUNCHER_CMD = [sys.executable, _SERVER, "--detach"]
 
 # The same server, as one pre-quoted element for the shell to parse, since
 # shell mode joins cmd with spaces and does no quoting of its own.
